@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.sqlite3
+backend/media/
+backend/staticfiles/
+
+# Env / secrets (never commit PHI or credentials)
+.env
+*.env
+!.env.example
+
+# Node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
