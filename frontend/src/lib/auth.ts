@@ -3,7 +3,7 @@
  * Access token stays in memory to mitigate XSS exfiltration; refresh token
  * persists across reloads. Mirrors the hk-labs pattern.
  */
-const REFRESH_KEY = "validation_refresh";
+const REFRESH_KEY = "cdew_refresh";
 
 let accessToken: string | null = null;
 const subscribers = new Set<() => void>();

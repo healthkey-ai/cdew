@@ -78,7 +78,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
-    "default": env.db("DATABASE_URL", default="postgres:///validation"),
+    "default": env.db("DATABASE_URL", default="postgres:///cdew"),
 }
 
 # Hybrid auth (design §11): identity model from the house pattern; role grants

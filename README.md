@@ -40,30 +40,30 @@ python manage.py runserver
 ### Database — option A: local (native) Postgres  ·  *recommended for local dev*
 
 If you already run a Postgres on `localhost:5432` (Postgres.app, Homebrew, …), just create the
-database once. With **no `DATABASE_URL` set**, Django uses the default `postgres:///validation`,
+database once. With **no `DATABASE_URL` set**, Django uses the default `postgres:///cdew`,
 connecting as your OS user over the local socket:
 
 ```bash
-createdb validation          # one-time; connects as your OS user
+createdb cdew          # one-time; connects as your OS user
 # ...then migrate / bootstrap_dev / runserver as above (no DATABASE_URL needed)
 ```
 
-Reset the DB: `dropdb validation && createdb validation && python manage.py migrate`.
+Reset the DB: `dropdb cdew && createdb cdew && python manage.py migrate`.
 
-If your OS role lacks `CREATEDB`, use a superuser: `createdb -U postgres validation` (or
-`psql -U postgres -c 'CREATE DATABASE validation;'`).
+If your OS role lacks `CREATEDB`, use a superuser: `createdb -U postgres cdew` (or
+`psql -U postgres -c 'CREATE DATABASE cdew;'`).
 
 ### Database — option B: Docker Postgres
 
 ```bash
 docker compose up -d db      # postgres on host port 5432
-export DATABASE_URL=postgres://validation:dev_only_change_in_prod@127.0.0.1:5432/validation
+export DATABASE_URL=postgres://cdew:dev_only_change_in_prod@127.0.0.1:5432/cdew
 ```
 
 ⚠️ If you **already** have a native Postgres on 5432 (option A), the container can't bind that port
 and won't be reachable. Either stop the native one, or remap the compose port and point
 `DATABASE_URL` at it, e.g. edit `docker-compose.yml` to `"5544:5432"` then use
-`...@127.0.0.1:5544/validation`. Use `127.0.0.1` (not `localhost`) so it resolves to the container
+`...@127.0.0.1:5544/cdew`. Use `127.0.0.1` (not `localhost`) so it resolves to the container
 over IPv4.
 
 ### Tests / CI

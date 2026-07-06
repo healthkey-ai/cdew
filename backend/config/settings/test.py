@@ -15,7 +15,7 @@ DATABASES = {
 }
 
 # Keep uploaded test files out of the repo.
-MEDIA_ROOT = tempfile.mkdtemp(prefix="validation-test-media-")
+MEDIA_ROOT = tempfile.mkdtemp(prefix="cdew-test-media-")
 
 # Deterministic classifier + extractor doubles — no gemini calls in CI (design §10).
 CLASSIFIER_SCORES_FN = "apps.prompts.testing.keyword_scores"
