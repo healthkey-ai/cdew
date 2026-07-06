@@ -10,4 +10,4 @@ class HealthView(APIView):
     authentication_classes: list = []
 
     def get(self, request):
-        return Response({"status": "ok", "service": "validation"})
+        return Response({"status": "ok", "service": "cdew"})

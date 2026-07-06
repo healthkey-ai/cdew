@@ -1,4 +1,4 @@
-# Validation Workflow — Schema Shape-Lint
+# CDEW (Clinical Data Extraction Workflow) — Schema Shape-Lint
 
 The gate that decides whether an authored prompt version may be **published** (design
 [§8](./design.md#8-prompt--schema-management-db--ui)). It runs on the `validate` endpoint (advisory,

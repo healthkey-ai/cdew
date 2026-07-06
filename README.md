@@ -1,10 +1,10 @@
-# Validation Workflow
+# CDEW — Clinical Data Extraction Workflow
 
 Admin tooling and AI flows for cleaning, extracting, and validating clinical data — one pipeline for
 all types of genomic and phenotype testing. See [`docs/design.md`](./docs/design.md) and
 [`docs/implementation-plan.md`](./docs/implementation-plan.md).
 
-`FHIR → documents → Validation Workflow → promop`
+`FHIR → documents → CDEW → promop`
 
 ## Layout
 

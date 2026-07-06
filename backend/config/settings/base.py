@@ -1,5 +1,5 @@
 """
-Base Django settings for the Validation Workflow service.
+Base Django settings for CDEW — the Clinical Data Extraction Workflow service.
 
 See docs/design.md. Stack: Django/DRF/Postgres, Prefect orchestration (added in
 Phase 2), gemini via Pydantic AI (Phase 3), hybrid auth (hk-identity + local roles).

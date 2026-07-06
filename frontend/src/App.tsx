@@ -23,10 +23,8 @@ export default function App() {
     <main className="mx-auto max-w-4xl p-8 font-sans">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Validation Workflow</h1>
-          <p className="mt-1 text-sm text-neutral-500">
-            Admin tooling — clinical data extraction &amp; validation
-          </p>
+          <h1 className="text-2xl font-bold">CDEW</h1>
+          <p className="mt-1 text-sm text-neutral-500">Clinical Data Extraction Workflow</p>
         </div>
         {authed && (
           <div className="text-right text-sm">

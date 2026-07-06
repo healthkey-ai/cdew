@@ -1,4 +1,4 @@
-# Validation Workflow — Design
+# CDEW (Clinical Data Extraction Workflow) — Design
 
 **Status:** Initial design · **Repo:** `ht-hk/validation` (standalone service)
 

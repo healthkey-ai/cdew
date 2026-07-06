@@ -1,4 +1,4 @@
-# Validation Workflow — Implementation Plan
+# CDEW (Clinical Data Extraction Workflow) — Implementation Plan
 
 Phased build-out of [`design.md`](./design.md). v1 target: **parse + extract → staging + review UI**
 (no promop commit, no geometry OCR). Each phase is independently demoable.
