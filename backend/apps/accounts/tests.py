@@ -64,3 +64,65 @@ class RolePermissionTests(APITestCase):
         admin = _identity(email="admin@x.org", roles=[Role.ADMIN])
         assert self._perm_ok(IsReviewer, admin)
         assert self._perm_ok(IsPromptAuthor, admin)
+
+
+class AdminUserManagementTests(APITestCase):
+    """The admin-gated create-user surface (design §11)."""
+
+    def _auth(self, identity):
+        token = RefreshToken.for_user(identity).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    def test_requires_admin(self):
+        assert self.client.get("/api/v1/auth/users/").status_code == 401
+        self._auth(_identity(email="rev@x.org", roles=[Role.REVIEWER]))
+        assert self.client.get("/api/v1/auth/users/").status_code == 403
+
+    def test_admin_creates_user_with_roles(self):
+        self._auth(_identity(email="admin@x.org", roles=[Role.ADMIN]))
+        r = self.client.post(
+            "/api/v1/auth/users/",
+            {"email": "New@x.org", "name": "New CDM", "password": "devpassword123", "roles": ["reviewer"]},
+            format="json",
+        )
+        assert r.status_code == 201, r.content
+        body = r.json()
+        assert body["email"] == "new@x.org"  # normalized
+        assert body["roles"] == ["reviewer"]
+
+        # The new user can sign in with the provisioned password.
+        login = self.client.post(
+            "/api/v1/auth/login/", {"email": "new@x.org", "password": "devpassword123"}, format="json"
+        )
+        assert login.status_code == 200, login.content
+
+    def test_duplicate_email_rejected(self):
+        _identity(email="dupe@x.org")
+        self._auth(_identity(email="admin@x.org", roles=[Role.ADMIN]))
+        r = self.client.post(
+            "/api/v1/auth/users/",
+            {"email": "dupe@x.org", "password": "devpassword123"},
+            format="json",
+        )
+        assert r.status_code == 400
+
+    def test_unknown_role_rejected(self):
+        self._auth(_identity(email="admin@x.org", roles=[Role.ADMIN]))
+        r = self.client.post(
+            "/api/v1/auth/users/",
+            {"email": "x@x.org", "password": "devpassword123", "roles": ["wizard"]},
+            format="json",
+        )
+        assert r.status_code == 400
+
+    def test_set_roles_replaces_grants(self):
+        target = _identity(email="target@x.org", roles=[Role.REVIEWER])
+        self._auth(_identity(email="admin@x.org", roles=[Role.ADMIN]))
+        r = self.client.patch(
+            f"/api/v1/auth/users/{target.id}/roles/",
+            {"roles": ["prompt_author", "admin"]},
+            format="json",
+        )
+        assert r.status_code == 200, r.content
+        assert set(r.json()["roles"]) == {"prompt_author", "admin"}
+        assert set(target.roles) == {"prompt_author", "admin"}

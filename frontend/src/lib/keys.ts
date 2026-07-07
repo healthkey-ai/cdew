@@ -5,7 +5,10 @@
 export const KEYS = {
   health: ["health"] as const,
   me: ["me"] as const,
-  documents: (patientRef?: string) => ["documents", patientRef ?? "all"] as const,
+  users: ["users"] as const,
+  documents: (patientRef?: string, status?: string) =>
+    ["documents", patientRef ?? "all", status ?? "any"] as const,
   documentText: (id: number) => ["documents", id, "text"] as const,
-  // Phase 3+: prompts: ["prompts"], promptVersions: (id: number) => ["prompts", id, "versions"],
+  promptDefinitions: ["prompts", "definitions"] as const,
+  promptVersions: (id: number) => ["prompts", "definitions", id, "versions"] as const,
 };

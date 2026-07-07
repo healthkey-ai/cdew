@@ -5,24 +5,32 @@ import { useJob } from "@/features/pipeline/api";
 import { ReviewPanel } from "@/features/review/ReviewPanel";
 import { useDocumentExtractions, useDocuments, useDocumentText, useUploadDocument } from "./api";
 
-/** Phase 1–2 UI: upload a document (runs the extract-document flow), poll the
- * job, list documents, click one to view parsed text. */
-export function DocumentsPanel() {
+const STATUS_FILTERS = [
+  { value: "", label: "All" },
+  { value: "needs_classification", label: "Needs classification" },
+  { value: "classified", label: "Classified" },
+  { value: "parse_failed", label: "Parse failed" },
+];
+
+/** Inbox queue (design §3): upload a document (runs the extract-document flow),
+ * poll the job, browse the queue, and open a document to view text / review. */
+export function InboxPage() {
   const qc = useQueryClient();
   const [patientRef, setPatientRef] = useState("PT-001");
+  const [statusFilter, setStatusFilter] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
   const [reviewDoc, setReviewDoc] = useState<number | null>(null);
   const [jobId, setJobId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const docs = useDocuments(patientRef || undefined);
+  const docs = useDocuments(patientRef || undefined, statusFilter || undefined);
   const text = useDocumentText(selected);
   const extractions = useDocumentExtractions(selected);
   const upload = useUploadDocument();
   const job = useJob(jobId);
   const jobStatus = job.data?.status;
 
-  // Refresh the document list when the job reaches a terminal state.
+  // Refresh the queue when the job reaches a terminal state.
   useEffect(() => {
     if (jobStatus === "completed" || jobStatus === "failed") {
       qc.invalidateQueries({ queryKey: ["documents"] });
@@ -45,10 +53,18 @@ export function DocumentsPanel() {
   };
 
   return (
-    <section className="mt-4 rounded-lg border border-neutral-200 p-4">
-      <h2 className="font-semibold">Documents</h2>
+    <section>
+      <h1 className="text-lg font-semibold">Inbox</h1>
+      <p className="mt-1 text-sm text-neutral-500">
+        Upload clinical documents; each runs ingest → parse → classify → extract, then lands in the
+        queue for review.
+      </p>
 
-      <form onSubmit={onUpload} className="mt-3 flex flex-wrap items-center gap-2">
+      {/* upload */}
+      <form
+        onSubmit={onUpload}
+        className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-neutral-200 p-4"
+      >
         <input
           className="rounded border border-neutral-300 px-2 py-1 text-sm"
           value={patientRef}
@@ -72,7 +88,29 @@ export function DocumentsPanel() {
         )}
       </form>
 
-      <table className="mt-4 w-full text-left text-sm">
+      {/* filters */}
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+        <input
+          className="rounded border border-neutral-300 px-2 py-1"
+          value={patientRef}
+          onChange={(e) => setPatientRef(e.target.value)}
+          placeholder="filter patient_ref"
+        />
+        <select
+          className="rounded border border-neutral-300 px-2 py-1"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        >
+          {STATUS_FILTERS.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* queue */}
+      <table className="mt-3 w-full text-left text-sm">
         <thead className="text-neutral-500">
           <tr>
             <th className="py-1">file</th>
@@ -113,7 +151,7 @@ export function DocumentsPanel() {
           {docs.data && docs.data.results.length === 0 && (
             <tr>
               <td colSpan={4} className="py-2 text-neutral-500">
-                no documents for this patient yet
+                no documents match this filter
               </td>
             </tr>
           )}
