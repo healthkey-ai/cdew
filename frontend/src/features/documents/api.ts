@@ -52,11 +52,13 @@ interface Paginated<T> {
   results: T[];
 }
 
-export function useDocuments(patientRef?: string) {
+export function useDocuments(patientRef?: string, status?: string) {
   return useQuery({
-    queryKey: KEYS.documents(patientRef),
+    queryKey: KEYS.documents(patientRef, status),
     queryFn: async () => {
-      const params = patientRef ? { patient_ref: patientRef } : {};
+      const params: Record<string, string> = {};
+      if (patientRef) params.patient_ref = patientRef;
+      if (status) params.status = status;
       return (await api.get<Paginated<SourceDocument>>("/documents/", { params })).data;
     },
   });
