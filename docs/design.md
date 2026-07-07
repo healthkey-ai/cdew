@@ -1,6 +1,6 @@
 # CDEW (Clinical Data Extraction Workflow) — Design
 
-**Status:** Initial design · **Repo:** `ht-hk/validation` (standalone service)
+**Status:** v1 built (Phases 0–6, end-to-end) · **Repo:** `healthkey-ai/cdew` (private, standalone service)
 
 Admin tooling and AI flows for **cleaning, extracting, and validating** clinical data — one
 pipeline for all types of genomic and phenotype testing. A document enters (uploaded, or produced
@@ -343,6 +343,14 @@ draft (optionally cloning a version); `PATCH` a draft (blocked once published); 
 - **Test-set management**: add/remove sample documents (from existing `SourceDocument`s), set optional
   expected output.
 
+> **As built (v1):** the admin app is a routed SPA and the "Prompts" area ships as two role-gated
+> pages rather than one tabbed screen — **Taxonomies** (the classifier: prompt + editable
+> `type / description / threshold` rows) and **Extractors** (per-extractor prompt + the `data` schema
+> edited as structured `name / type / description / required / nullable` **attribute rows**, not raw
+> JSON — the system still owns the `facts`/`provenance` envelope). Both share one version-lifecycle
+> toolbar (draft → validate → dry-run → publish → activate). The full tabbed editor + version-diff
+> polish is tracked in [`TODO.md`](../TODO.md).
+
 **Permissions:** authoring is a privileged **prompt-author** role (lead validators/admins), separate
 from ordinary reviewers.
 
@@ -421,6 +429,12 @@ prompts/schemas/taxonomy, §8), and **admin** (roles + config), edited via an ad
 `IsAuthenticated` (identity) + per-role permission gates (local roles). This keeps sign-in central
 while letting validation own its own role assignments.
 
+**Accounts are admin-provisioned — there is no self-service sign-up.** An admin creates a local
+identity and grants/edits its roles through the **Users** admin screen (`/api/v1/auth/users/`,
+admin-gated: list · create with email+password+roles · `PATCH …/{id}/roles/`). The login screen is
+the only unauthenticated surface; external SSO (Firebase via `hk-identity`) exchanges its token
+through `PartnerAuthentication` when wired.
+
 ---
 
 ## 12. Commit to promop (next iteration — noted, not built in v1)
@@ -482,6 +496,11 @@ When v1's staging is trusted, add the commit phase:
   volume (§5). Geometry OCR (Chandra/DeepSeek) is a tracked future option — [`TODO.md`](../TODO.md).
 - **`unclassified` triage** — **split** into `ambiguous` vs `out_of_taxonomy` reasons (both queue to
   human classification; queue is triageable by reason) (§3, §4).
+- **Environments & delivery** — `dev` → **staging**, `main` → **production** (later). Every change
+  lands via a PR into `dev`; **GitHub Actions CI** (backend `ci.sh` gate + frontend build/lint) is a
+  **required status check**, with branch protection on `dev`/`main` (PR-only, no direct pushes). Repo:
+  `healthkey-ai/cdew` (private). Standing up **staging on GCP** is the next infra step, still unbuilt —
+  tracked in [`TODO.md`](../TODO.md).
 
 ### Resolved as default (low-stakes; revisit any time)
 

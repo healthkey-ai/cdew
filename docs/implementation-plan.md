@@ -32,7 +32,8 @@ check + pytest 5/5). Frontend `npm install` + `npm run build` (tsc typecheck + V
 clean, and the **Vite dev proxy serves the SPA and forwards `/api` → Django** (health `200`). Torn
 down afterward. Three bugs the run surfaced were fixed: `env` star-import lint (production.py),
 `bootstrap_dev` empty-`sub` collision (use the manager), `tsconfig.node.json` composite `noEmit`
-(TS6310).
+(TS6310). The Phase-0 **GitHub Actions CI** deliverable is now realized — see the
+**Post-v1 — hardening & delivery** section below.
 
 ---
 
@@ -247,6 +248,34 @@ approve/reject/edit, add-fact (select text → "use selection" → snippet-autho
 category. **72 tests green**; live smoke on native Postgres: staged → verify 409 → approve+edit(span)
 → add manual fact → verify 200 (verified, category labs). **v1 pipeline complete end-to-end:
 ingest → parse → classify → extract → review/approve, with DB-authored prompts + shape-lint + dry-run.**
+
+---
+
+## Post-v1 — hardening & delivery  *(current)*
+
+Work done after the v1 pipeline landed (Phases 0–6), reconciling the plan with what's now in the repo.
+
+- **Frontend → routed multi-page admin.** The single-page scaffold (`DocumentsPanel` + `PromptsPanel`
+  + inline `LoginForm`) was refactored into a **React Router** app behind an authed shell (top nav,
+  API-health dot, role-gated routes): **`/login`** (full-page sign-in) · **`/inbox`** (upload +
+  document queue with status filter) · **`/taxonomies`** (classifier authoring) · **`/extractors`**
+  (extractor authoring) · **`/users`** (admin) · plus the existing **Review** surface. The design
+  §8.4 "Prompts area" ships as the two pages **Taxonomies** (classifier: prompt + `type/description/
+  threshold` rows) and **Extractors** (per-extractor prompt + structured **attribute rows** that
+  compile to a lint-valid `data` schema), sharing one draft→validate→dry-run→publish→activate toolbar.
+- **Admin user management** (design §11). `AdminUserViewSet` at `/api/v1/auth/users/` (admin-gated):
+  list local identities, **create** (email + password + roles), and **`PATCH …/{id}/roles/`** to edit
+  grants — the account-provisioning surface. **No self-service sign-up**; the login page is the only
+  unauthenticated screen. Backend tests cover create / login-after-create / duplicate-email /
+  unknown-role / role-replace.
+- **CI + branch protection.** `.github/workflows/ci.yml` runs on every PR into `dev`/`main` (and on
+  push): a **backend** job (`pip install` → `./ci.sh`: ruff + `makemigrations --check` + `manage.py
+  check` + pytest, offline) and a **frontend** job (`npm ci` → lint → `tsc -b`/`vite build`). Both are
+  **required status checks**; `dev` and `main` are protected (PR-only, 0 required approvals so a solo
+  maintainer isn't blocked, admins not enforced).
+- **Environments.** `dev` → **staging**, `main` → **production** (later). Repo `healthkey-ai/cdew`
+  (private), default branch `dev`. **Staging is not yet deployed** — standing it up on GCP is the next
+  infra step, tracked in [`TODO.md`](../TODO.md) (*Setup staging on GCP*).
 
 ---
 
