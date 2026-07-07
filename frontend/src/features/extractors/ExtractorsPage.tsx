@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Plus, Trash2 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { type PromptVersion, usePromptActions, usePromptDefinitions, usePromptVersions } from "@/features/prompts/api";
 import { VersionToolbar } from "@/features/prompts/VersionToolbar";
 import { type AttrRow, ATTR_TYPES, rowsToSchema, schemaToRows } from "./schema";
@@ -23,7 +34,6 @@ export function ExtractorsPage() {
   const [model, setModel] = useState("");
   const [rows, setRows] = useState<AttrRow[]>([]);
 
-  // Default the selected version to the active one (or the latest).
   useEffect(() => {
     if (!versions.data?.length) return;
     if (selVersion && versions.data.some((v) => v.id === selVersion.id)) return;
@@ -31,7 +41,6 @@ export function ExtractorsPage() {
     setSelVersion(active ?? versions.data[versions.data.length - 1]);
   }, [versions.data, def?.active_version?.id, selVersion]);
 
-  // Load the selected version into the editor.
   useEffect(() => {
     if (!selVersion) return;
     setPrompt(selVersion.prompt_text);
@@ -40,7 +49,6 @@ export function ExtractorsPage() {
   }, [selVersion]);
 
   const isDraft = selVersion?.status === "draft";
-
   const setRow = (i: number, patch: Partial<AttrRow>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
@@ -48,45 +56,62 @@ export function ExtractorsPage() {
     if (!selVersion) return;
     actions.saveDraft.mutate(
       { id: selVersion.id, prompt_text: prompt, model, json_schema: rowsToSchema(rows) },
-      { onSuccess: (v) => setSelVersion(v) },
+      { onSuccess: (v) => { setSelVersion(v); toast.success("Draft saved"); } },
     );
   };
 
   return (
-    <section>
-      <h1 className="text-lg font-semibold">Extractors</h1>
-      <p className="mt-1 text-sm text-neutral-500">
-        Each extractor pulls structured attributes from a document domain. Edit the extraction prompt
-        and the attributes to extract, then publish a new version.
-      </p>
+    <section className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Extractors</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Each extractor pulls structured attributes from a document domain. Edit the extraction prompt
+          and the attributes to extract, then publish a new version.
+        </p>
+      </div>
 
-      <div className="mt-4 grid grid-cols-[200px_1fr] gap-6">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-[220px_1fr]">
         {/* extractor list */}
-        <div className="text-sm">
-          {extractors.map((d) => (
-            <button
-              key={d.id}
-              onClick={() => {
-                setDefId(d.id);
-                setSelVersion(null);
-              }}
-              className={`block w-full rounded px-2 py-1 text-left ${d.id === defId ? "bg-neutral-100 font-medium" : ""}`}
-            >
-              {d.key}
-              <span className="ml-1 text-xs text-neutral-500">
-                {d.domain} · v{d.active_version?.version ?? "—"}
-              </span>
-            </button>
-          ))}
-          {extractors.length === 0 && <p className="text-neutral-500">no extractors</p>}
-        </div>
+        <Card className="h-fit">
+          <CardContent className="flex flex-col gap-0.5 p-2">
+            {extractors.map((d) => (
+              <button
+                key={d.id}
+                onClick={() => {
+                  setDefId(d.id);
+                  setSelVersion(null);
+                }}
+                className={
+                  "flex flex-col items-start rounded-md px-2.5 py-1.5 text-left text-sm transition-colors " +
+                  (d.id === defId ? "bg-accent font-medium text-accent-foreground" : "hover:bg-muted")
+                }
+              >
+                <span className="font-mono">{d.key}</span>
+                <span className="text-xs text-muted-foreground">
+                  {d.domain} · v{d.active_version?.version ?? "—"}
+                </span>
+              </button>
+            ))}
+            {extractors.length === 0 && (
+              <p className="p-2 text-sm text-muted-foreground">No extractors.</p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* editor */}
-        <div>
-          {!def ? (
-            <p className="text-sm text-neutral-500">select an extractor</p>
-          ) : (
-            <div className="space-y-4">
+        {!def ? (
+          <Card>
+            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+              Select an extractor to edit.
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader className="flex-row items-center gap-2 space-y-0">
+              <CardTitle className="font-mono">{def.key}</CardTitle>
+              <Badge variant="outline">{def.domain}</Badge>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <VersionToolbar
                 def={def}
                 versions={versions.data}
@@ -99,118 +124,122 @@ export function ExtractorsPage() {
 
               {selVersion && (
                 <>
-                  <div>
-                    <label className="mb-1 block text-xs text-neutral-500">extraction prompt</label>
-                    <textarea
-                      className="h-24 w-full rounded border border-neutral-300 p-2 font-mono text-xs"
+                  <div className="space-y-1.5">
+                    <Label>Extraction prompt</Label>
+                    <Textarea
+                      className="h-24 font-mono text-xs"
                       value={prompt}
                       disabled={!isDraft}
                       onChange={(e) => setPrompt(e.target.value)}
                     />
                   </div>
 
-                  <div>
-                    <div className="mb-1 flex items-center justify-between">
-                      <label className="text-xs text-neutral-500">attributes to extract</label>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label>Attributes to extract</Label>
                       {isDraft && (
-                        <button
-                          className="rounded border px-2 py-0.5 text-xs"
-                          onClick={() => setRows((rs) => [...rs, { ...EMPTY_ROW }])}
-                        >
-                          + attribute
-                        </button>
+                        <Button variant="outline" size="sm" onClick={() => setRows((rs) => [...rs, { ...EMPTY_ROW }])}>
+                          <Plus />
+                          Attribute
+                        </Button>
                       )}
                     </div>
-                    <table className="w-full text-left text-xs">
-                      <thead className="text-neutral-500">
-                        <tr>
-                          <th className="py-1 pr-2">name</th>
-                          <th className="pr-2">type</th>
-                          <th className="pr-2">description (extraction guidance)</th>
-                          <th className="pr-2">req</th>
-                          <th className="pr-2">null</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead className="w-28">Type</TableHead>
+                          <TableHead>Description (extraction guidance)</TableHead>
+                          <TableHead className="w-12 text-center">Req</TableHead>
+                          <TableHead className="w-12 text-center">Null</TableHead>
+                          <TableHead className="w-10" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {rows.map((r, i) => (
-                          <tr key={i} className="border-t border-neutral-100 align-top">
-                            <td className="py-1 pr-2">
-                              <input
-                                className="w-28 rounded border border-neutral-300 px-1 py-0.5 font-mono"
+                          <TableRow key={i} className="align-top">
+                            <TableCell>
+                              <Input
+                                className="w-32 font-mono"
                                 value={r.name}
                                 disabled={!isDraft}
                                 onChange={(e) => setRow(i, { name: e.target.value })}
                                 placeholder="test_name"
                               />
-                            </td>
-                            <td className="pr-2">
-                              <select
-                                className="rounded border border-neutral-300 px-1 py-0.5"
+                            </TableCell>
+                            <TableCell>
+                              <Select
                                 value={r.type}
+                                onValueChange={(v) => setRow(i, { type: v as AttrRow["type"] })}
                                 disabled={!isDraft}
-                                onChange={(e) => setRow(i, { type: e.target.value as AttrRow["type"] })}
                               >
-                                {ATTR_TYPES.map((t) => (
-                                  <option key={t}>{t}</option>
-                                ))}
-                              </select>
-                            </td>
-                            <td className="pr-2">
-                              <textarea
-                                className="h-10 w-full rounded border border-neutral-300 px-1 py-0.5"
+                                <SelectTrigger className="w-28">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {ATTR_TYPES.map((t) => (
+                                    <SelectItem key={t} value={t}>
+                                      {t}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell className="whitespace-normal">
+                              <Textarea
+                                className="min-h-9"
                                 value={r.description}
                                 disabled={!isDraft}
                                 onChange={(e) => setRow(i, { description: e.target.value })}
                               />
-                            </td>
-                            <td className="pr-2 text-center">
-                              <input
-                                type="checkbox"
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Checkbox
                                 checked={r.required}
                                 disabled={!isDraft}
-                                onChange={(e) => setRow(i, { required: e.target.checked })}
+                                onCheckedChange={(c) => setRow(i, { required: c === true })}
                               />
-                            </td>
-                            <td className="pr-2 text-center">
-                              <input
-                                type="checkbox"
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Checkbox
                                 checked={r.nullable}
                                 disabled={!isDraft}
-                                onChange={(e) => setRow(i, { nullable: e.target.checked })}
+                                onCheckedChange={(c) => setRow(i, { nullable: c === true })}
                               />
-                            </td>
-                            <td>
+                            </TableCell>
+                            <TableCell>
                               {isDraft && (
-                                <button
-                                  className="text-red-500 hover:underline"
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label="Remove"
                                   onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}
                                 >
-                                  remove
-                                </button>
+                                  <Trash2 className="text-destructive" />
+                                </Button>
                               )}
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         ))}
                         {rows.length === 0 && (
-                          <tr>
-                            <td colSpan={6} className="py-2 text-neutral-500">
-                              no attributes yet
-                            </td>
-                          </tr>
+                          <TableRow>
+                            <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">
+                              No attributes yet.
+                            </TableCell>
+                          </TableRow>
                         )}
-                      </tbody>
-                    </table>
-                    <p className="mt-1 text-xs text-neutral-400">
+                      </TableBody>
+                    </Table>
+                    <p className="text-xs text-muted-foreground">
                       Provenance (snippet + char range) is added by the system on every fact — you don’t
                       author it here.
                     </p>
                   </div>
 
-                  <div>
-                    <label className="mb-1 block text-xs text-neutral-500">model</label>
-                    <input
-                      className="rounded border border-neutral-300 px-2 py-1 text-xs"
+                  <div className="space-y-1.5">
+                    <Label>Model</Label>
+                    <Input
+                      className="w-64"
                       value={model}
                       disabled={!isDraft}
                       onChange={(e) => setModel(e.target.value)}
@@ -219,9 +248,9 @@ export function ExtractorsPage() {
                   </div>
                 </>
               )}
-            </div>
-          )}
-        </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </section>
   );
