@@ -30,15 +30,23 @@ def default_model_name(version) -> str:
     return f"{prefix}:{name}"
 
 
+def _type_prompt(t: dict) -> str:
+    """The per-type classification prompt (``prompt``; legacy rows use ``description``)."""
+    return (t.get("prompt") or t.get("description") or "").strip()
+
+
 def _system_prompt(version) -> str:
+    """Combine the version's overall Classification prompt with each type's own
+    per-type prompt (design §8) — both guide the multi-label scoring."""
     lines = [
         version.prompt_text.strip(),
         "",
-        "Document types — return a confidence 0.0–1.0 for every type that plausibly "
+        "Document types — each line is a type followed by its per-type prompt describing "
+        "how to recognise it. Return a confidence 0.0–1.0 for every type that plausibly "
         "applies (a document may be several types at once; omit types that clearly don't):",
     ]
     for t in version.taxonomy:
-        lines.append(f"- {t['type']}: {t.get('description', '')}")
+        lines.append(f"- {t['type']}: {_type_prompt(t)}")
     return "\n".join(lines)
 
 

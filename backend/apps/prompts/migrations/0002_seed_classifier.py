@@ -7,14 +7,16 @@ versions are seeded in Phase 4.
 from django.db import migrations
 from django.utils import timezone
 
+# Each type carries a per-type ``prompt`` (how to recognise it) that the classifier
+# combines with the version's overall Classification prompt (design §8).
 TAXONOMY = [
-    {"type": "lab_report", "description": "Laboratory results: test names, values, units, reference ranges.", "threshold": 0.5},
-    {"type": "genetics_report", "description": "Genetic testing report — FISH, NGS, or MRD results.", "threshold": 0.5},
-    {"type": "bone_marrow_biopsy", "description": "Bone marrow biopsy/aspirate pathology, plasma-cell percentage.", "threshold": 0.5},
-    {"type": "imaging_report", "description": "Radiology/imaging report (PET-CT, CT, MRI, skeletal survey).", "threshold": 0.5},
-    {"type": "office_visit", "description": "Oncology office visit / progress note: diagnoses, staging, plan.", "threshold": 0.5},
-    {"type": "flow_cytometry", "description": "Flow cytometry report (immunophenotyping).", "threshold": 0.5},
-    {"type": "immunohistochemistry", "description": "Immunohistochemistry (IHC) report.", "threshold": 0.5},
+    {"type": "lab_report", "prompt": "Laboratory results: test names, values, units, reference ranges.", "threshold": 0.5},
+    {"type": "genetics_report", "prompt": "Genetic testing report — FISH, NGS, or MRD results.", "threshold": 0.5},
+    {"type": "bone_marrow_biopsy", "prompt": "Bone marrow biopsy/aspirate pathology, plasma-cell percentage.", "threshold": 0.5},
+    {"type": "imaging_report", "prompt": "Radiology/imaging report (PET-CT, CT, MRI, skeletal survey).", "threshold": 0.5},
+    {"type": "office_visit", "prompt": "Oncology office visit / progress note: diagnoses, staging, plan.", "threshold": 0.5},
+    {"type": "flow_cytometry", "prompt": "Flow cytometry report (immunophenotyping).", "threshold": 0.5},
+    {"type": "immunohistochemistry", "prompt": "Immunohistochemistry (IHC) report.", "threshold": 0.5},
 ]
 
 CLASSIFIER_PROMPT = (
