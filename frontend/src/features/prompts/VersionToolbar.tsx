@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, FlaskConical, Plus, Save, Send, Star, XCircle } from "lucide-react";
+import { CheckCircle2, FlaskConical, Lock, Pencil, Plus, Save, Send, Star, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -82,6 +82,30 @@ export function VersionToolbar({ def, versions, selVersion, onSelect, actions, o
           Draft from active
         </Button>
       </div>
+
+      {/* read-only notice: published/archived versions are immutable (design §8) */}
+      {selVersion && !isDraft && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <Lock className="size-3.5" />
+            v{selVersion.version} is {selVersion.status} and read-only — create a draft to edit.
+          </span>
+          <Button
+            size="sm"
+            onClick={() =>
+              actions.createDraft.mutate(undefined, {
+                onSuccess: (v) => {
+                  onSelect(v);
+                  toast.success(`Draft v${v.version} created`);
+                },
+              })
+            }
+          >
+            <Pencil />
+            Edit as draft
+          </Button>
+        </div>
+      )}
 
       {/* lifecycle actions */}
       {selVersion && (
