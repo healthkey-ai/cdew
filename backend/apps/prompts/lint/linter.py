@@ -190,8 +190,10 @@ def lint_taxonomy(taxonomy):
         thr = t.get("threshold") if isinstance(t, dict) else None
         if not isinstance(thr, (int, float)) or isinstance(thr, bool) or not (0 <= thr <= 1):
             findings.append(Finding("error", "E061", f"taxonomy[{i}]", "threshold missing or outside [0, 1]"))
-        if not (isinstance(t, dict) and (t.get("description") or "").strip()):
-            findings.append(Finding("warning", "W110", f"taxonomy[{i}]", "type has an empty description"))
+        # Per-type prompt guides classification (design §8); ``prompt`` is
+        # canonical, ``description`` is the legacy key. Warn only if both empty.
+        if not (isinstance(t, dict) and (t.get("prompt") or t.get("description") or "").strip()):
+            findings.append(Finding("warning", "W110", f"taxonomy[{i}]", "type has an empty prompt"))
     return findings
 
 

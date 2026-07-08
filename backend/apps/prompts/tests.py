@@ -34,6 +34,23 @@ class ClassifierAgentTests(TestCase):
             assert isinstance(s, TypeScore)
             assert 0.0 <= s.confidence <= 1.0
 
+    def test_system_prompt_combines_classification_and_per_type_prompts(self):
+        # The classifier prompt = overall Classification prompt + each type's
+        # per-type prompt (design §8). `prompt` is canonical; `description` legacy.
+        from apps.prompts.agents import _system_prompt
+
+        class _V:
+            prompt_text = "Classify this myeloma document."
+            taxonomy = [
+                {"type": "lab_report", "prompt": "Lab values and units.", "threshold": 0.5},
+                {"type": "legacy_type", "description": "Legacy per-type text.", "threshold": 0.5},
+            ]
+
+        sp = _system_prompt(_V())
+        assert "Classify this myeloma document." in sp  # overall classification prompt
+        assert "lab_report: Lab values and units." in sp  # per-type prompt (canonical)
+        assert "legacy_type: Legacy per-type text." in sp  # description fallback
+
 
 class ExtractAgentTests(TestCase):
     def test_extract_facts_have_data_and_provenance(self):

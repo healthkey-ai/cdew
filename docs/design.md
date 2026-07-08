@@ -275,7 +275,7 @@ reproducible.
   `extractor` (one per `key`, e.g. `lab_report`). It carries the routing config (`triggers_on_types`),
   an `enabled` flag (does the pipeline run it), and a pointer to its **`active_version`**.
 - **`PromptVersion`** is one revision: `prompt_text`, `json_schema` (extractors), `taxonomy`
-  (classifier: `[{type, description, threshold}]`), `model`, and `params`. Lifecycle:
+  (classifier: `[{type, prompt, threshold}]` — the per-type classification prompt), `model`, and `params`. Lifecycle:
 
   ```
   draft ──edit freely──► validate ──dry-run──► publish ──► (active)
@@ -333,7 +333,7 @@ draft (optionally cloning a version); `PATCH` a draft (blocked once published); 
   version #, status.
 - **Editor** (tabbed): **Prompt** (monospace, documented variable placeholders) · **Schema**
   (JSON-Schema editor with live validation + shape lint; extractors) · **Taxonomy** (editable
-  `type / description / threshold` rows; classifier) · **Model & params** · **Routing**
+  `type / prompt / threshold` rows; classifier) · **Model & params** · **Routing**
   (`triggers_on_types`, extractors).
 - **Version history**: versions with status/author/published-at/notes, a **diff** between two
   versions (prompt + schema), and **rollback** (activate an older one).
@@ -345,7 +345,7 @@ draft (optionally cloning a version); `PATCH` a draft (blocked once published); 
 
 > **As built (v1):** the admin app is a routed SPA and the "Prompts" area ships as two role-gated
 > pages rather than one tabbed screen — **Taxonomies** (the classifier: prompt + editable
-> `type / description / threshold` rows) and **Extractors** (per-extractor prompt + the `data` schema
+> `type / prompt / threshold` rows) and **Extractors** (per-extractor prompt + the `data` schema
 > edited as structured `name / type / description / required / nullable` **attribute rows**, not raw
 > JSON — the system still owns the `facts`/`provenance` envelope). Both share one version-lifecycle
 > toolbar (draft → validate → dry-run → publish → activate). The full tabbed editor + version-diff

@@ -167,8 +167,9 @@ nothing un-mappable reaches promop. The table below mirrors that module.
 
 ## 6. Classifier taxonomy lint
 
-A classifier version authors a `taxonomy: [{ type, description, threshold }]` instead of a `data`
-schema. Its compiled `output_type` is `[{ type: <enum of taxonomy types>, confidence: 0–1 }]`, scoring
+A classifier version authors a `taxonomy: [{ type, prompt, threshold }]` instead of a `data`
+schema (`prompt` is the per-type classification prompt — legacy rows may use `description`;
+both are accepted). Its compiled `output_type` is `[{ type: <enum of taxonomy types>, confidence: 0–1 }]`, scoring
 each type independently — so a valid classification may name **zero, one, or many** types. An **empty
 result is valid**: the pipeline routes a document with no type above threshold to the
 human-classification queue (design §3), so **no synthetic `unknown`/catch-all type is required** in the
@@ -178,7 +179,7 @@ taxonomy.
 |------|-------|------|
 | `E060` | error | A `type` is empty or not a unique slug (`^[a-z][a-z0-9_]*$`), or duplicated. |
 | `E061` | error | `threshold` missing or outside `[0, 1]`. |
-| `W110` | warn | A `type` has an empty `description` (the classifier prompt leans on it). |
+| `W110` | warn | A `type` has an empty `prompt` (`description` accepted as legacy; the classifier leans on it). |
 
 ---
 

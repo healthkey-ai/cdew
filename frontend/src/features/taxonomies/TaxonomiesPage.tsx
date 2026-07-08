@@ -13,16 +13,17 @@ import { VersionToolbar } from "@/features/prompts/VersionToolbar";
 
 interface TaxRow {
   type: string;
-  description: string;
+  prompt: string;
   threshold: number;
 }
 
-const EMPTY_ROW: TaxRow = { type: "", description: "", threshold: 0.5 };
+const EMPTY_ROW: TaxRow = { type: "", prompt: "", threshold: 0.5 };
 
+// `prompt` is the canonical per-type field; older versions used `description`.
 function toRows(taxonomy: unknown[]): TaxRow[] {
-  return (taxonomy as Partial<TaxRow>[]).map((t) => ({
+  return (taxonomy as { type?: string; prompt?: string; description?: string; threshold?: number }[]).map((t) => ({
     type: t.type ?? "",
-    description: t.description ?? "",
+    prompt: t.prompt ?? t.description ?? "",
     threshold: typeof t.threshold === "number" ? t.threshold : 0.5,
   }));
 }
@@ -83,8 +84,10 @@ export function TaxonomiesPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Taxonomies</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          The document types the classifier scores. Edit the classification prompt and each type’s
-          description + routing threshold, then publish a new version.
+          The document types the classifier scores. Add, edit, or remove types; each type carries a
+          per-type <span className="font-medium">prompt</span> that the classifier uses{" "}
+          <span className="font-medium">together with</span> the overall Classification prompt below.
+          Edit on a draft, then publish a new version.
         </p>
       </div>
 
@@ -126,6 +129,9 @@ export function TaxonomiesPage() {
               <>
                 <div className="space-y-1.5">
                   <Label>Classification prompt</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Applied to every document, combined with each type’s per-type prompt below.
+                  </p>
                   <Textarea
                     className="h-24 font-mono text-xs"
                     value={prompt}
@@ -148,7 +154,7 @@ export function TaxonomiesPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Type (slug)</TableHead>
-                        <TableHead>Description (how to classify it)</TableHead>
+                        <TableHead>Prompt (how to classify it)</TableHead>
                         <TableHead className="w-24">Threshold</TableHead>
                         <TableHead className="w-10" />
                       </TableRow>
@@ -168,9 +174,10 @@ export function TaxonomiesPage() {
                           <TableCell className="whitespace-normal">
                             <Textarea
                               className="min-h-9"
-                              value={r.description}
+                              value={r.prompt}
                               disabled={!isDraft}
-                              onChange={(e) => setRow(i, { description: e.target.value })}
+                              onChange={(e) => setRow(i, { prompt: e.target.value })}
+                              placeholder="How to recognise this type…"
                             />
                           </TableCell>
                           <TableCell>
