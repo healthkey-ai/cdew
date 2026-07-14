@@ -1,5 +1,5 @@
 from django.utils import timezone
-from rest_framework import status, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -17,17 +17,26 @@ from .serializers import (
 )
 
 
-class DocumentViewSet(viewsets.ReadOnlyModelViewSet):
-    """List/retrieve documents; upload via POST; read parsed text via /text/."""
+class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
+    """List/retrieve documents; upload via POST; read parsed text via /text/;
+    delete via DELETE (reviewer-gated)."""
 
     queryset = SourceDocument.objects.all().order_by("-created_at")
     serializer_class = SourceDocumentSerializer
     permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
-        if self.action == "verify":
+        if self.action in ("verify", "destroy"):
             return [IsReviewer()]
         return super().get_permissions()
+
+    def perform_destroy(self, instance):
+        """Remove a document. Deletes the stored original from object storage
+        (PHI hygiene — Django won't auto-delete a FileField) then the row, which
+        cascades to text / classification / extractions / jobs (design §13)."""
+        if instance.file:
+            instance.file.delete(save=False)
+        instance.delete()
 
     def get_queryset(self):
         qs = super().get_queryset().select_related("classification", "text")
