@@ -64,6 +64,14 @@ export function useDocuments(patientRef?: string, status?: string) {
   });
 }
 
+export function useDocument(id: number | null) {
+  return useQuery({
+    queryKey: id ? ["documents", id, "detail"] : ["documents", "none", "detail"],
+    enabled: id != null,
+    queryFn: async () => (await api.get<SourceDocument>(`/documents/${id}/`)).data,
+  });
+}
+
 export function useDocumentText(id: number | null) {
   return useQuery({
     queryKey: id ? KEYS.documentText(id) : ["documents", "none", "text"],

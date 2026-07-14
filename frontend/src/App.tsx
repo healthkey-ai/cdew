@@ -4,6 +4,7 @@ import { AppLayout } from "@/components/AppLayout";
 import { RequireAuth, RequireRole } from "@/components/RequireAuth";
 import { useAuth } from "@/features/auth/api";
 import { LoginPage } from "@/features/auth/LoginPage";
+import { DocumentViewPage } from "@/features/documents/DocumentViewPage";
 import { InboxPage } from "@/features/documents/InboxPage";
 import { ExtractorsPage } from "@/features/extractors/ExtractorsPage";
 import { TaxonomiesPage } from "@/features/taxonomies/TaxonomiesPage";
@@ -21,6 +22,7 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route index element={<Navigate to="/inbox" replace />} />
           <Route path="/inbox" element={<InboxPage />} />
+          <Route path="/inbox/:docId" element={<DocumentViewPage />} />
 
           {/* Prompt authoring (prompt_author / admin) */}
           <Route element={<RequireRole anyOf={["prompt_author"]} />}>

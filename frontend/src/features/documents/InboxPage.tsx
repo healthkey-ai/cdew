@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, Trash2, Upload, X } from "lucide-react";
+import { Eye, Loader2, Trash2, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,15 +13,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useMe } from "@/features/auth/api";
 import { useJob } from "@/features/pipeline/api";
-import { ReviewPanel } from "@/features/review/ReviewPanel";
+import { cn } from "@/lib/utils";
 import { type SourceDocument } from "./api";
-import {
-  useDeleteDocument,
-  useDocumentExtractions,
-  useDocuments,
-  useDocumentText,
-  useUploadDocument,
-} from "./api";
+import { useDeleteDocument, useDocuments, useUploadDocument } from "./api";
 
 const STATUS_FILTERS = [
   { value: "all", label: "All statuses" },
@@ -43,20 +38,16 @@ function classificationText(d: SourceDocument) {
     : `unclassified · ${d.classification.reason}`;
 }
 
-/** Inbox queue (design §3): upload a document (runs the extract-document flow),
- * poll the job, browse the queue, and open a document to view text / review. */
+/** Inbox queue (design §3): upload a document, poll the job, browse the queue,
+ * and open a document on its own view page (parsed document + facts). */
 export function InboxPage() {
   const qc = useQueryClient();
   const [patientRef, setPatientRef] = useState("PT-001");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [selected, setSelected] = useState<number | null>(null);
-  const [reviewDoc, setReviewDoc] = useState<number | null>(null);
   const [jobId, setJobId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const docs = useDocuments(patientRef || undefined, statusFilter === "all" ? undefined : statusFilter);
-  const text = useDocumentText(selected);
-  const extractions = useDocumentExtractions(selected);
   const upload = useUploadDocument();
   const del = useDeleteDocument();
   const job = useJob(jobId);
@@ -102,11 +93,7 @@ export function InboxPage() {
       return;
     }
     del.mutate(d.id, {
-      onSuccess: () => {
-        toast.success("Document deleted");
-        if (selected === d.id) setSelected(null);
-        if (reviewDoc === d.id) setReviewDoc(null);
-      },
+      onSuccess: () => toast.success("Document deleted"),
       onError: (err) => {
         const s = (err as { response?: { status?: number } }).response?.status;
         toast.error(s === 403 ? "You need the reviewer role to delete" : "Delete failed");
@@ -201,7 +188,11 @@ export function InboxPage() {
                 ))}
               {rows.map((d) => (
                 <TableRow key={d.id}>
-                  <TableCell className="font-medium">{d.original_filename || `doc#${d.id}`}</TableCell>
+                  <TableCell className="font-medium">
+                    <Link to={`/inbox/${d.id}`} className="text-primary hover:underline">
+                      {d.original_filename || `doc#${d.id}`}
+                    </Link>
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">
                       <Badge variant={statusVariant(d.status)}>{d.status}</Badge>
@@ -211,16 +202,10 @@ export function InboxPage() {
                   <TableCell className="text-muted-foreground">{classificationText(d)}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      {d.has_text && (
-                        <>
-                          <Button variant="ghost" size="sm" onClick={() => setSelected(d.id)}>
-                            text
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => setReviewDoc(d.id)}>
-                            review
-                          </Button>
-                        </>
-                      )}
+                      <Link to={`/inbox/${d.id}`} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+                        <Eye />
+                        view
+                      </Link>
                       {canDelete && (
                         <Button
                           variant="ghost"
@@ -248,52 +233,6 @@ export function InboxPage() {
           </Table>
         </CardContent>
       </Card>
-
-      {/* parsed text + facts */}
-      {selected != null && (
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle>Document #{selected}</CardTitle>
-            <Button variant="ghost" size="icon" aria-label="Close" onClick={() => setSelected(null)}>
-              <X />
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="mb-1 text-xs font-medium text-muted-foreground">Parsed text</div>
-              {text.isPending ? (
-                <Skeleton className="h-40 w-full" />
-              ) : (
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs">
-                  {text.data?.content || "(empty)"}
-                </pre>
-              )}
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-medium text-muted-foreground">
-                Extracted facts{extractions.data ? ` (${extractions.data.length})` : ""}
-              </div>
-              <ul className="space-y-1.5">
-                {extractions.data?.map((f) => (
-                  <li key={f.id} className="rounded-md border p-2 text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <Badge variant="secondary">{f.domain || f.extractor_key}</Badge>
-                      {f.status !== "staged" && <Badge variant="outline">{f.status}</Badge>}
-                    </div>
-                    <code className="mt-1 block break-all">{JSON.stringify(f.payload)}</code>
-                    <div className="mt-0.5 text-muted-foreground">“{f.provenance.snippet}”</div>
-                  </li>
-                ))}
-                {extractions.data && extractions.data.length === 0 && (
-                  <li className="text-xs text-muted-foreground">No extracted facts.</li>
-                )}
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {reviewDoc != null && <ReviewPanel docId={reviewDoc} onClose={() => setReviewDoc(null)} />}
     </section>
   );
 }
