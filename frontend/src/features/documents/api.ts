@@ -96,3 +96,15 @@ export function useUploadDocument() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["documents"] }),
   });
 }
+
+/** Delete a document (reviewer-gated). Cascades text/classification/extractions. */
+export function useDeleteDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      await api.delete(`/documents/${id}/`);
+      return id;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["documents"] }),
+  });
+}

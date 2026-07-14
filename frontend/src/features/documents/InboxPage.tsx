@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, Upload, X } from "lucide-react";
+import { Loader2, Trash2, Upload, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,10 +10,17 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useMe } from "@/features/auth/api";
 import { useJob } from "@/features/pipeline/api";
 import { ReviewPanel } from "@/features/review/ReviewPanel";
 import { type SourceDocument } from "./api";
-import { useDocumentExtractions, useDocuments, useDocumentText, useUploadDocument } from "./api";
+import {
+  useDeleteDocument,
+  useDocumentExtractions,
+  useDocuments,
+  useDocumentText,
+  useUploadDocument,
+} from "./api";
 
 const STATUS_FILTERS = [
   { value: "all", label: "All statuses" },
@@ -51,8 +58,12 @@ export function InboxPage() {
   const text = useDocumentText(selected);
   const extractions = useDocumentExtractions(selected);
   const upload = useUploadDocument();
+  const del = useDeleteDocument();
   const job = useJob(jobId);
   const jobStatus = job.data?.status;
+
+  const me = useMe();
+  const canDelete = (me.data?.roles ?? []).some((r) => r === "reviewer" || r === "admin");
 
   // Refresh the queue + notify when the job reaches a terminal state.
   useEffect(() => {
@@ -83,6 +94,24 @@ export function InboxPage() {
         onError: () => toast.error("Upload failed"),
       },
     );
+  };
+
+  const onDelete = (d: SourceDocument) => {
+    const label = d.original_filename || `doc#${d.id}`;
+    if (!window.confirm(`Delete “${label}”? This permanently removes the document and all its extractions.`)) {
+      return;
+    }
+    del.mutate(d.id, {
+      onSuccess: () => {
+        toast.success("Document deleted");
+        if (selected === d.id) setSelected(null);
+        if (reviewDoc === d.id) setReviewDoc(null);
+      },
+      onError: (err) => {
+        const s = (err as { response?: { status?: number } }).response?.status;
+        toast.error(s === 403 ? "You need the reviewer role to delete" : "Delete failed");
+      },
+    });
   };
 
   const rows = docs.data?.results ?? [];
@@ -181,16 +210,30 @@ export function InboxPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">{classificationText(d)}</TableCell>
                   <TableCell className="text-right">
-                    {d.has_text && (
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => setSelected(d.id)}>
-                          text
+                    <div className="flex justify-end gap-1">
+                      {d.has_text && (
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => setSelected(d.id)}>
+                            text
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => setReviewDoc(d.id)}>
+                            review
+                          </Button>
+                        </>
+                      )}
+                      {canDelete && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-muted-foreground hover:text-destructive"
+                          aria-label={`Delete ${d.original_filename || `doc#${d.id}`}`}
+                          disabled={del.isPending}
+                          onClick={() => onDelete(d)}
+                        >
+                          <Trash2 />
                         </Button>
-                        <Button variant="outline" size="sm" onClick={() => setReviewDoc(d.id)}>
-                          review
-                        </Button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

@@ -108,3 +108,43 @@ class SniffMimeUnitTests(APITestCase):
 
     def test_xlsx_disambiguated_from_zip(self):
         assert sniff_mime(_xlsx_bytes(), "s.xlsx").endswith("spreadsheetml.sheet")
+
+
+class DocumentDeleteTests(APITestCase):
+    """DELETE /documents/{id}/ — reviewer-gated, cascades (design §13)."""
+
+    def setUp(self):
+        from apps.accounts.models import Role, RoleAssignment
+
+        self.reviewer = Identity.objects.create(issuer="urn:local", sub="rev", email="rev@x.org")
+        RoleAssignment.objects.create(identity=self.reviewer, role=Role.REVIEWER)
+        self.plain = Identity.objects.create(issuer="urn:local", sub="plain", email="plain@x.org")
+
+    def _auth(self, identity):
+        token = RefreshToken.for_user(identity).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    def _make_doc(self):
+        self._auth(self.plain)  # upload only needs auth, not the reviewer role
+        f = SimpleUploadedFile("labs.txt", b"Hemoglobin 9.1 g/dL", content_type="text/plain")
+        r = self.client.post("/api/v1/documents/", {"file": f, "patient_ref": "P9"}, format="multipart")
+        assert r.status_code == 201, r.content
+        return r.json()["id"]
+
+    def test_non_reviewer_cannot_delete(self):
+        doc_id = self._make_doc()
+        self._auth(self.plain)
+        r = self.client.delete(f"/api/v1/documents/{doc_id}/")
+        assert r.status_code == 403
+        assert SourceDocument.objects.filter(id=doc_id).exists()
+
+    def test_reviewer_deletes_and_cascades(self):
+        from apps.documents.models import DocumentText
+
+        doc_id = self._make_doc()
+        assert DocumentText.objects.filter(document_id=doc_id).exists()
+        self._auth(self.reviewer)
+        r = self.client.delete(f"/api/v1/documents/{doc_id}/")
+        assert r.status_code == 204, r.content
+        assert not SourceDocument.objects.filter(id=doc_id).exists()
+        assert not DocumentText.objects.filter(document_id=doc_id).exists()  # cascaded
