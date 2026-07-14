@@ -71,6 +71,7 @@ export function AppLayout() {
                   Extractors
                 </NavLink>
               )}
+              {isAdmin && <Separator orientation="vertical" className="mx-1 h-5" />}
               {isAdmin && (
                 <NavLink to="/users" className={navCls}>
                   Users
