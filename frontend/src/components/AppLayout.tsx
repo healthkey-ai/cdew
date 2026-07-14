@@ -50,11 +50,12 @@ export function AppLayout() {
               <NavLink to="/inbox" className={navCls}>
                 Inbox
               </NavLink>
-              <NavLink to="/workflow" className={navCls}>
-                Workflow
-              </NavLink>
               <NavLink to="/review" className={navCls}>
                 Review
+              </NavLink>
+              <Separator orientation="vertical" className="mx-1 h-5" />
+              <NavLink to="/workflow" className={navCls}>
+                Workflow
               </NavLink>
               {(canAuthor || isAdmin) && <Separator orientation="vertical" className="mx-1 h-5" />}
               {canAuthor && (
