@@ -4,6 +4,7 @@ import { useTheme } from "next-themes";
 import { LogOut, Moon, Sun } from "lucide-react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { useHealth, useMe } from "@/features/auth/api";
 import { authStore } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -49,6 +50,17 @@ export function AppLayout() {
               <NavLink to="/inbox" className={navCls}>
                 Inbox
               </NavLink>
+              <NavLink to="/review" className={navCls}>
+                Review
+              </NavLink>
+              <NavLink to="/processed" className={navCls}>
+                Processed
+              </NavLink>
+              <Separator orientation="vertical" className="mx-1 h-5" />
+              <NavLink to="/workflow" className={navCls}>
+                Workflow
+              </NavLink>
+              {(canAuthor || isAdmin) && <Separator orientation="vertical" className="mx-1 h-5" />}
               {canAuthor && (
                 <NavLink to="/taxonomies" className={navCls}>
                   Taxonomies
@@ -59,6 +71,7 @@ export function AppLayout() {
                   Extractors
                 </NavLink>
               )}
+              {isAdmin && <Separator orientation="vertical" className="mx-1 h-5" />}
               {isAdmin && (
                 <NavLink to="/users" className={navCls}>
                   Users
