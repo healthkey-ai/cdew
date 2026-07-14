@@ -131,6 +131,11 @@ Each document flows top to bottom; stages run as Prefect tasks (§6).
 Design spine: one normalized document model regardless of source; classification gates extraction;
 every attribute is provenance-bearing; async, parallel, idempotent processing.
 
+> **As built:** uploads **do not auto-classify by default** (`settings.PIPELINE_AUTO_CLASSIFY`, off) —
+> a document is ingested and parsed, then waits in the human-classification queue (status
+> `needs_classification`) for a reviewer to classify; classify → extract (stages 3–5) then run on that
+> trigger. Set the flag on to auto-run classify → extract on upload.
+
 ---
 
 ## 4. Data model

@@ -224,6 +224,12 @@ PREFECT_DEPLOYMENT = env("PREFECT_DEPLOYMENT", default="extract-document/default
 # PREFECT_API_URL is read by Prefect itself from the environment (self-hosted on GCP
 # for staging/prod; unset → ephemeral local for `thread` dev runs).
 
+# ── Auto-classify on upload (design §3) ─────────────────────────────────────
+# Default OFF: an uploaded document is parsed and then waits in the
+# human-classification queue (status NEEDS_CLASSIFICATION); a reviewer triggers
+# classification/extraction. Set True to auto-run classify → extract on upload.
+PIPELINE_AUTO_CLASSIFY = env.bool("PIPELINE_AUTO_CLASSIFY", default=False)
+
 # ── Pluggable partner auth providers (hybrid auth, design §11) ──────────────
 # PartnerAuthentication iterates these in order; first to recognise the bearer
 # token wins. Empty by default → JWT-only (bootable offline). A Firebase

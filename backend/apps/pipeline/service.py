@@ -7,6 +7,7 @@ as Prefect tasks) in Phase 3/4.
 """
 import logging
 
+from django.conf import settings
 from django.utils import timezone
 
 from apps.documents.models import DocumentStatus
@@ -41,6 +42,14 @@ def execute_pipeline(job_id: int) -> ExtractionJob:
     # A near-empty parse (scanned/image) is already flagged to the human queue;
     # skip classification and complete. Otherwise classify (design §3.3).
     if doc.status == DocumentStatus.NEEDS_CLASSIFICATION:
+        return _finish(job, JobStatus.COMPLETED)
+
+    # Upload does NOT auto-classify by default (settings.PIPELINE_AUTO_CLASSIFY):
+    # a parsed document waits in the human-classification queue until a reviewer
+    # classifies it. Flip the setting on to auto-run classify → extract.
+    if not getattr(settings, "PIPELINE_AUTO_CLASSIFY", False):
+        doc.status = DocumentStatus.NEEDS_CLASSIFICATION
+        doc.save(update_fields=["status", "updated_at"])
         return _finish(job, JobStatus.COMPLETED)
 
     job.stage = Stage.CLASSIFY
