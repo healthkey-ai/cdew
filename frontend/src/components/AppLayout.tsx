@@ -53,6 +53,9 @@ export function AppLayout() {
               <NavLink to="/review" className={navCls}>
                 Review
               </NavLink>
+              <NavLink to="/processed" className={navCls}>
+                Processed
+              </NavLink>
               <Separator orientation="vertical" className="mx-1 h-5" />
               <NavLink to="/workflow" className={navCls}>
                 Workflow
