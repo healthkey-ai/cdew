@@ -2,7 +2,7 @@ import base64
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -33,7 +33,8 @@ def _doc(content=b"Hemoglobin 9.1 g/dL low value here.", name="a.txt", ctype="te
 
 
 class PipelineServiceTests(TestCase):
-    def test_completes_and_parses(self):
+    def test_upload_stops_at_needs_classification_by_default(self):
+        # Default (PIPELINE_AUTO_CLASSIFY off): parse then wait in the human queue.
         job = ExtractionJob.objects.create(document=_doc())
         execute_pipeline(job.id)
         job.refresh_from_db()
@@ -41,6 +42,16 @@ class PipelineServiceTests(TestCase):
         assert job.stage == Stage.DONE
         assert job.progress == 1.0
         assert job.started_at and job.finished_at
+        assert job.document.status == DocumentStatus.NEEDS_CLASSIFICATION
+        assert job.document.extractions.count() == 0  # nothing auto-extracted
+
+    @override_settings(PIPELINE_AUTO_CLASSIFY=True)
+    def test_completes_and_parses_with_auto_classify(self):
+        job = ExtractionJob.objects.create(document=_doc())
+        execute_pipeline(job.id)
+        job.refresh_from_db()
+        assert job.status == JobStatus.COMPLETED
+        assert job.stage == Stage.DONE
         # lab content is classified → routed → CLASSIFIED (parse then classify)
         assert job.document.status == DocumentStatus.CLASSIFIED
 
@@ -151,7 +162,8 @@ class JobApiTests(APITestCase):
         assert body["status"] == JobStatus.COMPLETED
         assert body["stage"] == Stage.DONE
         assert body["progress"] == 1.0
-        assert SourceDocument.objects.get(id=r.json()["id"]).status == DocumentStatus.CLASSIFIED
+        # Default: upload does not auto-classify → waits in the human queue.
+        assert SourceDocument.objects.get(id=r.json()["id"]).status == DocumentStatus.NEEDS_CLASSIFICATION
 
     def test_jobs_filter_by_document(self):
         r = self._upload("PT-filter")
@@ -164,7 +176,17 @@ class JobApiTests(APITestCase):
         self.client.credentials()
         assert self.client.get("/api/v1/jobs/1/").status_code == 401
 
-    def test_upload_produces_extractions(self):
+    def test_upload_does_not_auto_extract_by_default(self):
+        f = SimpleUploadedFile("labs.txt", b"Hemoglobin 9.1 g/dL\nSodium 140 mmol/L", content_type="text/plain")
+        r = self.client.post("/api/v1/documents/", {"file": f, "patient_ref": "PT-X"}, format="multipart")
+        assert r.status_code == 201, r.content
+        doc_id = r.json()["id"]
+        ex = self.client.get(f"/api/v1/documents/{doc_id}/extractions/")
+        assert ex.status_code == 200
+        assert ex.json() == []  # no auto-extraction on upload (waits for classification)
+
+    @override_settings(PIPELINE_AUTO_CLASSIFY=True)
+    def test_upload_produces_extractions_when_auto_classify(self):
         f = SimpleUploadedFile("labs.txt", b"Hemoglobin 9.1 g/dL\nSodium 140 mmol/L", content_type="text/plain")
         r = self.client.post("/api/v1/documents/", {"file": f, "patient_ref": "PT-X"}, format="multipart")
         assert r.status_code == 201, r.content

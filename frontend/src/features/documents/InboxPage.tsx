@@ -121,8 +121,8 @@ export function InboxPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Inbox</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Upload clinical documents; each runs ingest → parse → classify → extract, then lands in the
-          queue for review.
+          Upload clinical documents; each is ingested and parsed, then lands in the{" "}
+          <span className="font-medium">Needs classification</span> queue for a reviewer to classify.
         </p>
       </div>
 
