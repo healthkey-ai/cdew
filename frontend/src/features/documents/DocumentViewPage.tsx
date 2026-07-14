@@ -8,13 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { type ExtractionRecord, useDocument, useDocumentExtractions, useDocumentText } from "./api";
-
-function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "parse_failed") return "destructive";
-  if (status === "needs_classification") return "outline";
-  if (status === "classified") return "secondary";
-  return "secondary";
-}
+import { statusLabel, statusVariant } from "./status";
 
 /** Document view (design §3, §9): the parsed document on its own page, with the
  * extracted facts — click a fact to highlight its supporting span in the text. */
@@ -47,7 +41,7 @@ export function DocumentViewPage() {
         </Link>
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-          {d && <Badge variant={statusVariant(d.status)}>{d.status}</Badge>}
+          {d && <Badge variant={statusVariant(d.status)}>{statusLabel(d.status)}</Badge>}
           {d?.verified && <Badge variant="secondary">✓ verified</Badge>}
         </div>
         {d && (

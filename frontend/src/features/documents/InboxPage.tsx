@@ -16,6 +16,7 @@ import { useJob } from "@/features/pipeline/api";
 import { cn } from "@/lib/utils";
 import { type SourceDocument } from "./api";
 import { useDeleteDocument, useDocuments, useUploadDocument } from "./api";
+import { statusLabel, statusVariant } from "./status";
 
 const STATUS_FILTERS = [
   { value: "all", label: "All statuses" },
@@ -23,13 +24,6 @@ const STATUS_FILTERS = [
   { value: "classified", label: "Classified" },
   { value: "parse_failed", label: "Parse failed" },
 ];
-
-function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "parse_failed") return "destructive";
-  if (status === "needs_classification") return "outline";
-  if (status === "classified") return "secondary";
-  return "secondary";
-}
 
 function classificationText(d: SourceDocument) {
   if (!d.classification) return "—";
@@ -195,7 +189,7 @@ export function InboxPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">
-                      <Badge variant={statusVariant(d.status)}>{d.status}</Badge>
+                      <Badge variant={statusVariant(d.status)}>{statusLabel(d.status)}</Badge>
                       {d.verified && <Badge variant="secondary">✓ verified</Badge>}
                     </div>
                   </TableCell>
