@@ -21,6 +21,9 @@ interface TaxRow {
 
 const EMPTY_ROW: TaxRow = { type: "", prompt: "", threshold: 0.5 };
 
+/** "document_classifier" → "Document Classifier". */
+const humanize = (s: string) => s.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
 // `prompt` is the canonical per-type field; older versions used `description`.
 function toRows(taxonomy: unknown[]): TaxRow[] {
   return (taxonomy as { type?: string; prompt?: string; description?: string; threshold?: number }[]).map((t) => ({
@@ -114,7 +117,7 @@ export function TaxonomiesPage() {
       {def && (
         <Tabs defaultValue="editor">
           <TabsList>
-            <TabsTrigger value="editor">{def.key}</TabsTrigger>
+            <TabsTrigger value="editor">{humanize(def.key)}</TabsTrigger>
             <TabsTrigger value="testset">Test Set</TabsTrigger>
           </TabsList>
 
