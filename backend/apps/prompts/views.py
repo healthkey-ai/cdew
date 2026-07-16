@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from apps.accounts.permissions import IsPromptAuthor
 
 from .lint.linter import lint_version
-from .models import PromptDefinition, PromptTestSample, PromptVersion
+from .models import PromptDefinition, PromptKind, PromptTestSample, PromptVersion
 from .serializers import (
     PromptDefinitionSerializer,
     PromptTestSampleSerializer,
@@ -68,11 +68,38 @@ class PromptDefinitionViewSet(viewsets.ModelViewSet):
 
 
 class PromptVersionViewSet(
-    mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet
+    mixins.RetrieveModelMixin, mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet
 ):
     queryset = PromptVersion.objects.select_related("definition").all()
     serializer_class = PromptVersionSerializer
     permission_classes = [IsPromptAuthor]
+
+    @staticmethod
+    def _is_referenced(version) -> bool:
+        """Has this version produced any recorded classification/extraction?
+        (`*_version_id` are soft refs — deleting would orphan provenance.)"""
+        from apps.documents.models import DocumentClassification, ExtractionRecord
+
+        if version.definition.kind == PromptKind.CLASSIFIER:
+            return DocumentClassification.objects.filter(classifier_version_id=version.id).exists()
+        return ExtractionRecord.objects.filter(extractor_version_id=version.id).exists()
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete a draft or published version. Guards (design §8): the active
+        version can't be deleted (activate another first), and a version that
+        produced records is kept for reproducibility."""
+        version = self.get_object()
+        if version.definition.active_version_id == version.id:
+            return Response(
+                {"detail": "This version is active — activate another version before deleting it."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if self._is_referenced(version):
+            return Response(
+                {"detail": "This version produced records and is kept for reproducibility; it can't be deleted."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     def _lint(self, version):
         d = version.definition

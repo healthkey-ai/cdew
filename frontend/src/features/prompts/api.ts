@@ -133,6 +133,13 @@ export function usePromptActions(defId: number | null) {
       mutationFn: async (id: number) =>
         (await api.post<{ results: DryRunRow[] }>(`${P}/versions/${id}/dry-run/`)).data,
     }),
+    deleteVersion: useMutation({
+      mutationFn: async (id: number) => {
+        await api.delete(`${P}/versions/${id}/`);
+        return id;
+      },
+      onSuccess: invalidate,
+    }),
   };
 }
 

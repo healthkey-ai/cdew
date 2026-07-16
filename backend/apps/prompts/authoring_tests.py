@@ -97,6 +97,32 @@ class PromptAuthoringTests(APITestCase):
         assert r.status_code == 200
         assert r.json()["ok"] is True  # seeded schema is clean
 
+    def test_delete_draft(self):
+        draft = self._new_draft()
+        r = self.client.delete(f"/api/v1/prompts/versions/{draft['id']}/")
+        assert r.status_code == 204
+        assert not PromptVersion.objects.filter(id=draft["id"]).exists()
+
+    def test_cannot_delete_active_version(self):
+        r = self.client.delete(f"/api/v1/prompts/versions/{self.lab.active_version_id}/")
+        assert r.status_code == 409
+        assert PromptVersion.objects.filter(id=self.lab.active_version_id).exists()
+
+    def test_delete_published_non_active(self):
+        old_active = self.lab.active_version_id
+        draft = self._new_draft()
+        assert self.client.post(f"/api/v1/prompts/versions/{draft['id']}/publish/").status_code == 200
+        # old_active is now non-active and produced no records → deletable
+        r = self.client.delete(f"/api/v1/prompts/versions/{old_active}/")
+        assert r.status_code == 204
+
+    def test_cannot_delete_version_with_records(self):
+        draft = self._new_draft()
+        doc, _ = ingest_upload(SimpleUploadedFile("r.txt", b"body text", content_type="text/plain"), "R1")
+        ExtractionRecord.objects.create(document=doc, extractor_key="lab_report", extractor_version_id=draft["id"])
+        r = self.client.delete(f"/api/v1/prompts/versions/{draft['id']}/")
+        assert r.status_code == 409
+
 
 class PromptTestSetTests(APITestCase):
     """Per-definition labeled test sets + dry-run pass/fail (design §8.3)."""
