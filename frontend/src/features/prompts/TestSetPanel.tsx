@@ -37,7 +37,12 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
     () => (isClassifier ? ((version?.taxonomy as { type: string }[] | undefined)?.map((t) => t.type) ?? []) : []),
     [isClassifier, version],
   );
-  const parsedDocs = (docs.data?.results ?? []).filter((d) => d.has_text);
+  const parsedDocs = useMemo(() => (docs.data?.results ?? []).filter((d) => d.has_text), [docs.data]);
+  // value → label map so the Select trigger shows the filename, not the id.
+  const docItems = useMemo(
+    () => Object.fromEntries(parsedDocs.map((d) => [String(d.id), d.original_filename || `doc#${d.id}`])),
+    [parsedDocs],
+  );
 
   const addSample = () =>
     sactions.create.mutate(
@@ -106,7 +111,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={docId} onValueChange={(v) => setDocId(v ?? "")}>
+          <Select value={docId} onValueChange={(v) => setDocId(v ?? "")} items={docItems}>
             <SelectTrigger className="h-8 w-64">
               <SelectValue placeholder="Add a parsed document…" />
             </SelectTrigger>
