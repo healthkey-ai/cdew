@@ -123,7 +123,7 @@ export function TaxonomiesPage() {
 
           <TabsContent value="editor" className="mt-4">
             <Card>
-              <CardContent className="space-y-4 pt-6">
+              <CardContent className="space-y-4">
             <VersionToolbar
               def={def}
               versions={versions.data}
