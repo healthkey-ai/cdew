@@ -41,6 +41,47 @@ export interface LintResult {
   findings: LintFinding[];
 }
 
+/** A labeled test sample scoped to one definition (design §8.3). `expected_payload`
+ * is the gold: classifier → string[] of type slugs; extractor → object[] of fact data. */
+export interface TestSample {
+  id: number;
+  definition: number;
+  document: number;
+  document_filename: string;
+  document_has_text: boolean;
+  definition_kind: "classifier" | "extractor";
+  label: string;
+  expected_payload: unknown | null;
+  notes: string;
+}
+
+export interface DryRunFact {
+  data: Record<string, unknown>;
+  snippet: string;
+  char_start: number;
+  char_end: number;
+  resolved: boolean;
+  confidence: number | null;
+}
+
+/** One dry-run result row (keyed to a sample). Fields depend on the kind. */
+export interface DryRunRow {
+  sample_id: number;
+  label: string;
+  document_id: number;
+  passed?: boolean;
+  // extractor
+  facts?: DryRunFact[];
+  expected?: unknown;
+  // classifier
+  routed_types?: string[];
+  outcome?: string;
+  reason?: string | null;
+  expected_types?: string[];
+  missing?: string[];
+  extra?: string[];
+}
+
 const P = "/prompts";
 
 export function usePromptDefinitions() {
@@ -89,7 +130,42 @@ export function usePromptActions(defId: number | null) {
       onSuccess: invalidate,
     }),
     dryRun: useMutation({
-      mutationFn: async (id: number) => (await api.post(`${P}/versions/${id}/dry-run/`)).data,
+      mutationFn: async (id: number) =>
+        (await api.post<{ results: DryRunRow[] }>(`${P}/versions/${id}/dry-run/`)).data,
+    }),
+  };
+}
+
+/** The definition's labeled test set. */
+export function useTestSamples(defId: number | null) {
+  return useQuery({
+    queryKey: ["prompts", "test-set", defId],
+    enabled: defId != null,
+    queryFn: async () =>
+      (await api.get<{ results: TestSample[] }>(`${P}/test-set/`, { params: { definition: defId } })).data.results,
+  });
+}
+
+export function useTestSampleActions(defId: number | null) {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["prompts", "test-set", defId] });
+  return {
+    create: useMutation({
+      mutationFn: async (s: { document: number; label?: string; expected_payload?: unknown }) =>
+        (await api.post<TestSample>(`${P}/test-set/`, { ...s, definition: defId })).data,
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: async ({ id, ...body }: { id: number } & Partial<TestSample>) =>
+        (await api.patch<TestSample>(`${P}/test-set/${id}/`, body)).data,
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: async (id: number) => {
+        await api.delete(`${P}/test-set/${id}/`);
+        return id;
+      },
+      onSuccess: invalidate,
     }),
   };
 }

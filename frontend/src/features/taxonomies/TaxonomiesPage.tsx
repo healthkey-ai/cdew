@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { type PromptVersion, usePromptActions, usePromptDefinitions, usePromptVersions } from "@/features/prompts/api";
+import { TestSetPanel } from "@/features/prompts/TestSetPanel";
 import { VersionToolbar } from "@/features/prompts/VersionToolbar";
 
 interface TaxRow {
@@ -232,6 +233,8 @@ export function TaxonomiesPage() {
           </CardContent>
         </Card>
       )}
+
+      {def && selVersion && <TestSetPanel def={def} version={selVersion} />}
     </section>
   );
 }

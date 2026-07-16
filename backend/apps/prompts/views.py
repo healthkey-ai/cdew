@@ -114,7 +114,11 @@ class PromptVersionViewSet(
         from apps.pipeline.dryrun import dry_run_version
 
         version = self.get_object()
-        samples = PromptTestSample.objects.select_related("document").all()
+        # Only this definition's samples; optionally a selected subset.
+        samples = PromptTestSample.objects.select_related("document").filter(definition=version.definition_id)
+        ids = request.data.get("sample_ids")
+        if ids:
+            samples = samples.filter(id__in=ids)
         return Response({"results": dry_run_version(version, samples)})
 
 
@@ -122,6 +126,13 @@ class PromptTestSampleViewSet(viewsets.ModelViewSet):
     queryset = PromptTestSample.objects.all().order_by("-created_at")
     serializer_class = PromptTestSampleSerializer
     permission_classes = [IsPromptAuthor]
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related("document", "definition")
+        definition = self.request.query_params.get("definition")
+        if definition:
+            qs = qs.filter(definition_id=definition)
+        return qs
 
     def perform_create(self, serializer):
         user = self.request.user

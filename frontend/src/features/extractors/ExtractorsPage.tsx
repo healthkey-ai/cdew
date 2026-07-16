@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { type PromptVersion, usePromptActions, usePromptDefinitions, usePromptVersions } from "@/features/prompts/api";
+import { TestSetPanel } from "@/features/prompts/TestSetPanel";
 import { VersionToolbar } from "@/features/prompts/VersionToolbar";
 import { type AttrRow, ATTR_TYPES, rowsToSchema, schemaToRows } from "./schema";
 
@@ -252,6 +253,8 @@ export function ExtractorsPage() {
           </Card>
         )}
       </div>
+
+      {def && selVersion && <TestSetPanel def={def} version={selVersion} />}
     </section>
   );
 }
