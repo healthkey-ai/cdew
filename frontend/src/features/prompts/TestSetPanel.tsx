@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { FlaskConical, Plus, Trash2 } from "lucide-react";
+import { FlaskConical, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,6 +71,12 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
           toast.info("Ran — add gold to see pass/fail");
         }
       },
+      onError: (err) => {
+        const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+        // The dry-run runs the real model server-side; most failures here are the
+        // LLM not being reachable/configured in this environment.
+        toast.error(detail ?? "Dry-run failed — is the LLM configured for this environment?");
+      },
     });
   };
 
@@ -105,8 +111,8 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle>Test set{samples.data ? ` (${samples.data.length})` : ""}</CardTitle>
         <Button size="sm" onClick={runAll} disabled={!version || !samples.data?.length || dryRun.isPending}>
-          <FlaskConical />
-          Run test set
+          {dryRun.isPending ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+          {dryRun.isPending ? "Running…" : "Run test set"}
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
