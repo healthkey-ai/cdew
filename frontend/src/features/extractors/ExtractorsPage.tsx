@@ -4,16 +4,18 @@ import { Plus, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { type PromptVersion, usePromptActions, usePromptDefinitions, usePromptVersions } from "@/features/prompts/api";
 import { TestSetPanel } from "@/features/prompts/TestSetPanel";
 import { VersionToolbar } from "@/features/prompts/VersionToolbar";
+import { humanize } from "@/lib/utils";
 import { type AttrRow, ATTR_TYPES, rowsToSchema, schemaToRows } from "./schema";
 
 const EMPTY_ROW: AttrRow = { name: "", type: "string", description: "", required: false, nullable: false };
@@ -107,12 +109,18 @@ export function ExtractorsPage() {
             </CardContent>
           </Card>
         ) : (
-          <Card>
-            <CardHeader className="flex-row items-center gap-2 space-y-0">
-              <CardTitle className="font-mono">{def.key}</CardTitle>
+          <Tabs defaultValue="editor">
+            <div className="flex items-center gap-2">
+              <TabsList>
+                <TabsTrigger value="editor">{humanize(def.key)}</TabsTrigger>
+                <TabsTrigger value="testset">Test Set</TabsTrigger>
+              </TabsList>
               <Badge variant="outline">{def.domain}</Badge>
-            </CardHeader>
-            <CardContent className="space-y-4">
+            </div>
+
+            <TabsContent value="editor" className="mt-4">
+              <Card>
+                <CardContent className="space-y-4">
               <VersionToolbar
                 def={def}
                 versions={versions.data}
@@ -249,12 +257,20 @@ export function ExtractorsPage() {
                   </div>
                 </>
               )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="testset" className="mt-4">
+              {selVersion ? (
+                <TestSetPanel def={def} version={selVersion} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Select a version to run the test set.</p>
+              )}
+            </TabsContent>
+          </Tabs>
         )}
       </div>
-
-      {def && selVersion && <TestSetPanel def={def} version={selVersion} />}
     </section>
   );
 }

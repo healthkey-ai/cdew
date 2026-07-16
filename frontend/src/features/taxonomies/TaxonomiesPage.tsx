@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { type PromptVersion, usePromptActions, usePromptDefinitions, usePromptVersions } from "@/features/prompts/api";
 import { TestSetPanel } from "@/features/prompts/TestSetPanel";
 import { VersionToolbar } from "@/features/prompts/VersionToolbar";
+import { humanize } from "@/lib/utils";
 
 interface TaxRow {
   type: string;
@@ -20,9 +21,6 @@ interface TaxRow {
 }
 
 const EMPTY_ROW: TaxRow = { type: "", prompt: "", threshold: 0.5 };
-
-/** "document_classifier" → "Document Classifier". */
-const humanize = (s: string) => s.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 // `prompt` is the canonical per-type field; older versions used `description`.
 function toRows(taxonomy: unknown[]): TaxRow[] {
