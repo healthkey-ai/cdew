@@ -24,10 +24,25 @@ class ClassificationOutput(BaseModel):
     scores: list[TypeScore] = Field(default_factory=list)
 
 
-def default_model_name(version) -> str:
+def default_model(version):
+    """Build the Pydantic AI model for this version (design §10). Vertex / Google
+    Cloud (BAA) via ADC in staging/prod; the Gemini API (GLA, API key) in dev.
+    Provider names per pydantic-ai: ``google-cloud`` (Vertex) / ``google`` (GLA)."""
+    from pydantic_ai.models.google import GoogleModel
+
     name = version.model or settings.LLM_MODEL
-    prefix = "google-vertex" if settings.GEMINI_BACKEND == "vertex" else "google-gla"
-    return f"{prefix}:{name}"
+    if settings.GEMINI_BACKEND == "vertex":
+        from pydantic_ai.providers.google_cloud import GoogleCloudProvider
+
+        provider = GoogleCloudProvider(
+            project=settings.GOOGLE_CLOUD_PROJECT or None,
+            location=settings.VERTEX_LOCATION or None,
+        )
+    else:
+        from pydantic_ai.providers.google import GoogleProvider
+
+        provider = GoogleProvider(api_key=settings.GEMINI_API_KEY or None)
+    return GoogleModel(name, provider=provider)
 
 
 def _type_prompt(t: dict) -> str:
@@ -55,7 +70,7 @@ def classify_scores(version, text: str, *, model=None) -> list[TypeScore]:
     from pydantic_ai import Agent
 
     agent = Agent(
-        model or default_model_name(version),
+        model or default_model(version),
         output_type=ClassificationOutput,
         system_prompt=_system_prompt(version),
         retries=2,
@@ -113,7 +128,7 @@ def extract_facts(version, text: str, *, model=None) -> list[dict]:
 
     output_model = build_extraction_output_model(version)
     agent = Agent(
-        model or default_model_name(version),
+        model or default_model(version),
         output_type=output_model,
         system_prompt=_extraction_system_prompt(version),
         retries=2,
