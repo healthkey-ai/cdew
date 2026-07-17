@@ -79,6 +79,62 @@ function factsTable(rows: Record<string, unknown>[], attrs: string[], sources?: 
   );
 }
 
+/** Row-by-row diff of extracted vs expected facts (design §8.3). Each fact index
+ * yields two rows — extracted then expected — with differing cells highlighted.
+ * A missing row on either side shows as "—" (a whole highlighted row). */
+function diffTable(extracted: Record<string, unknown>[], expected: Record<string, unknown>[], attrs: string[]) {
+  const n = Math.max(extracted.length, expected.length);
+  const differs = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
+  const line = (
+    i: number,
+    which: "extracted" | "expected",
+    data: Record<string, unknown> | undefined,
+    other: Record<string, unknown> | undefined,
+  ) => (
+    <TableRow key={`${i}-${which}`} className={cn(which === "extracted" && i > 0 && "border-t-2")}>
+      {which === "extracted" && (
+        <TableCell rowSpan={2} className="align-middle font-medium">
+          {i + 1}
+        </TableCell>
+      )}
+      <TableCell className="py-1 text-muted-foreground">{which}</TableCell>
+      {attrs.map((a) => (
+        <TableCell
+          key={a}
+          className={cn("py-1", differs(data?.[a], other?.[a]) && "bg-destructive/10 text-destructive")}
+        >
+          {data ? cell(data[a]) : <span className="text-muted-foreground">—</span>}
+        </TableCell>
+      ))}
+    </TableRow>
+  );
+  return (
+    <div className="max-h-96 overflow-auto rounded-md border bg-background">
+      <Table className="text-xs">
+        <TableHeader className="sticky top-0 z-10 bg-muted">
+          <TableRow>
+            <TableHead className="h-8 w-8 text-muted-foreground">#</TableHead>
+            <TableHead className="h-8 w-20 text-muted-foreground">side</TableHead>
+            {attrs.map((a) => (
+              <TableHead key={a} className="h-8">
+                {a}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: n }, (_, i) => (
+            <Fragment key={i}>
+              {line(i, "extracted", extracted[i], expected[i])}
+              {line(i, "expected", expected[i], extracted[i])}
+            </Fragment>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 /** A Button with a hover tooltip that explains the action in a bit more detail
  * than the label alone. Merges the tooltip trigger onto the Button (no extra DOM). */
 function TipButton({ tip, ...props }: { tip: string } & ComponentProps<typeof Button>) {
@@ -310,6 +366,8 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
             {samples.data?.map((s) => {
               const open = expandedId === s.id;
               const facts = extractedFacts(s);
+              // Extractor mismatch (both sides present and unequal) → offer a Diff tab.
+              const showDiff = !isClassifier && passOf(s) === false;
 
               const expectedEditor = (
                 <div>
@@ -479,10 +537,15 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                             </TabsContent>
                           </Tabs>
                         ) : (
-                          <Tabs defaultValue="extracted">
+                          <Tabs defaultValue={showDiff ? "diff" : "extracted"}>
                             <TabsList>
                               <TabsTrigger value="extracted">Extracted{facts ? ` (${facts.length})` : ""}</TabsTrigger>
                               <TabsTrigger value="expected">Expected</TabsTrigger>
+                              {showDiff && (
+                                <TabsTrigger value="diff" className="text-destructive data-active:text-destructive!">
+                                  Diff
+                                </TabsTrigger>
+                              )}
                             </TabsList>
 
                             <TabsContent value="extracted" className="mt-3">
@@ -511,6 +574,20 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                 </TabsContent>
                               </Tabs>
                             </TabsContent>
+
+                            {showDiff && (
+                              <TabsContent value="diff" className="mt-3 space-y-2">
+                                <p className="text-xs text-muted-foreground">
+                                  Extracted ≠ Expected — differing fields are highlighted. Fix the extractor, or
+                                  correct the Expected value.
+                                </p>
+                                {diffTable(
+                                  facts?.map((f) => f.data) ?? [],
+                                  (s.expected_payload as Record<string, unknown>[]) ?? [],
+                                  attrs,
+                                )}
+                              </TabsContent>
+                            )}
 
                             <TabsContent value="expected" className="mt-3">
                               <Tabs defaultValue="table">
