@@ -154,41 +154,114 @@ function factsTable(
   );
 }
 
-/** Count fact indexes that differ between extracted and expected (a row present
- * on only one side counts as a difference). Drives the Diff tab's count badge. */
-function countRowDiffs(extracted: Record<string, unknown>[], expected: Record<string, unknown>[], attrs: string[]) {
-  const n = Math.max(extracted.length, expected.length);
-  let c = 0;
-  for (let i = 0; i < n; i++) {
-    const a = extracted[i];
-    const b = expected[i];
-    if (!a || !b || attrs.some((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))) c++;
+type FactRow = Record<string, unknown>;
+type FactPair = { ex?: FactRow; exp?: FactRow; kind: "same" | "changed" | "extra" | "missing" };
+
+/** Stable stringify (object keys sorted) so equality is order-of-keys independent. */
+const stable = (o: unknown) =>
+  JSON.stringify(o, (_k, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.keys(v as object)
+          .sort()
+          .reduce((a, k) => ({ ...a, [k]: (v as Record<string, unknown>)[k] }), {})
+      : v,
+  );
+
+/** Align two fact bags **without any domain key** (works for every extractor):
+ *  1) match byte-identical facts 1:1 (multiset intersection) → `same`,
+ *  2) greedily pair leftovers by field similarity → `changed` (field-level diff),
+ *  3) whatever is left is `extra` (extracted-only) or `missing` (expected-only).
+ * Order never matters; duplicate copies with no counterpart surface as extra/missing. */
+function alignFacts(extracted: FactRow[], expected: FactRow[], attrs: string[]): FactPair[] {
+  const pairs: FactPair[] = [];
+  const expKeys = expected.map(stable);
+  const usedExp = new Set<number>();
+  const leftoverEx: FactRow[] = [];
+
+  for (const e of extracted) {
+    const k = stable(e);
+    const j = expKeys.findIndex((ek, idx) => !usedExp.has(idx) && ek === k);
+    if (j >= 0) {
+      usedExp.add(j);
+      pairs.push({ ex: e, exp: expected[j], kind: "same" });
+    } else {
+      leftoverEx.push(e);
+    }
   }
-  return c;
+
+  const leftoverExp = expected.filter((_, idx) => !usedExp.has(idx));
+  const usedR = new Set<number>();
+  const sim = (a: FactRow, b: FactRow) =>
+    attrs.reduce((n, k) => n + (JSON.stringify(a[k]) === JSON.stringify(b[k]) ? 1 : 0), 0);
+
+  for (const e of leftoverEx) {
+    let best = -1;
+    let bestScore = 0;
+    leftoverExp.forEach((g, idx) => {
+      if (usedR.has(idx)) return;
+      const sc = sim(e, g);
+      if (sc > bestScore) {
+        bestScore = sc;
+        best = idx;
+      }
+    });
+    if (best >= 0) {
+      usedR.add(best);
+      pairs.push({ ex: e, exp: leftoverExp[best], kind: "changed" });
+    } else {
+      pairs.push({ ex: e, kind: "extra" });
+    }
+  }
+  leftoverExp.forEach((g, idx) => {
+    if (!usedR.has(idx)) pairs.push({ exp: g, kind: "missing" });
+  });
+  return pairs;
 }
 
-/** Row-by-row diff of extracted vs expected facts (design §8.3). Each fact index
- * yields two rows — extracted then expected — with differing cells highlighted.
- * A missing row on either side shows as "—" (a whole highlighted row). */
+/** Two fact bags are equal iff, ignoring order, every fact pairs 1:1 (multiset). */
+const factsEqual = (a: FactRow[], b: FactRow[]) =>
+  a.length === b.length && alignFacts(a, b, []).every((p) => p.kind === "same");
+
+const KIND_LABEL: Record<FactPair["kind"], string> = {
+  same: "match",
+  changed: "changed",
+  extra: "extra",
+  missing: "missing",
+};
+
+/** Diff of extracted vs expected facts (design §8.3), order-insensitive: facts are
+ * aligned by identity/similarity (see {@link alignFacts}), not by position. Only
+ * differing pairs are shown — each as two rows (extracted then expected) with the
+ * changed cells highlighted; a side with no counterpart shows "—". Matched-identical
+ * rows are hidden (their count is noted). */
 function diffTable(
   extracted: Record<string, unknown>[],
   expected: Record<string, unknown>[],
   attrs: string[],
   cols: ColWidths,
 ) {
-  const n = Math.max(extracted.length, expected.length);
   const total = 40 + 80 + attrs.reduce((m, a) => m + cols.widthOf(a), 0);
   const differs = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
+  const pairs = alignFacts(extracted, expected, attrs);
+  const diffs = pairs.filter((p) => p.kind !== "same");
+  const sameCount = pairs.length - diffs.length;
+
   const line = (
-    i: number,
+    gi: number,
     which: "extracted" | "expected",
     data: Record<string, unknown> | undefined,
     other: Record<string, unknown> | undefined,
+    kind: FactPair["kind"],
   ) => (
-    <TableRow key={`${i}-${which}`} className={cn(which === "extracted" && i > 0 && "border-t-2")}>
+    <TableRow key={`${gi}-${which}`} className={cn(which === "extracted" && gi > 0 && "border-t-2")}>
       {which === "extracted" && (
-        <TableCell rowSpan={2} className="align-middle font-medium">
-          {i + 1}
+        <TableCell rowSpan={2} className="align-middle">
+          <Badge
+            variant={kind === "changed" ? "secondary" : "destructive"}
+            className={cn("font-normal", kind === "changed" && "text-destructive")}
+          >
+            {KIND_LABEL[kind]}
+          </Badge>
         </TableCell>
       )}
       <TableCell className="py-1 text-muted-foreground">{which}</TableCell>
@@ -215,7 +288,7 @@ function diffTable(
         </colgroup>
         <TableHeader className="sticky top-0 z-10 bg-muted">
           <TableRow>
-            <TableHead className="h-8 text-muted-foreground">#</TableHead>
+            <TableHead className="h-8 text-muted-foreground" />
             <TableHead className="h-8 text-muted-foreground">side</TableHead>
             {attrs.map((a) => (
               <TableHead key={a} className="relative h-8 truncate">
@@ -226,12 +299,19 @@ function diffTable(
           </TableRow>
         </TableHeader>
         <TableBody>
-          {Array.from({ length: n }, (_, i) => (
-            <Fragment key={i}>
-              {line(i, "extracted", extracted[i], expected[i])}
-              {line(i, "expected", expected[i], extracted[i])}
+          {diffs.map((p, gi) => (
+            <Fragment key={gi}>
+              {line(gi, "extracted", p.ex, p.exp, p.kind)}
+              {line(gi, "expected", p.exp, p.ex, p.kind)}
             </Fragment>
           ))}
+          {sameCount > 0 && (
+            <TableRow>
+              <TableCell colSpan={attrs.length + 2} className="py-1.5 text-center text-muted-foreground">
+                {sameCount} matching {sameCount === 1 ? "fact" : "facts"} hidden
+              </TableCell>
+            </TableRow>
+          )}
         </TableBody>
       </Table>
     </div>
@@ -303,8 +383,9 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       const exp = new Set(s.expected_payload as string[]);
       return routed.size === exp.size && [...routed].every((t) => exp.has(t));
     }
+    // Order-insensitive: extracted facts are an unordered bag, compared as a multiset.
     const facts = (extractedFacts(s) ?? []).map((f) => f.data);
-    return JSON.stringify(facts) === JSON.stringify(s.expected_payload);
+    return factsEqual(facts, (s.expected_payload as FactRow[]) ?? []);
   };
 
   const addSample = () =>
@@ -386,6 +467,31 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       }
     }
     sactions.update.mutate({ id: s.id, expected_payload: payload }, { onSuccess: () => toast.success("Expected saved") });
+  };
+
+  // Drop byte-identical duplicate facts from Expected (generic across extractors).
+  const dedupeExpected = (s: TestSample) => {
+    const arr = (s.expected_payload as FactRow[] | null) ?? [];
+    const seen = new Set<string>();
+    const unique = arr.filter((f) => {
+      const k = stable(f);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    if (unique.length === arr.length) {
+      toast.info("No duplicate facts");
+      return;
+    }
+    sactions.update.mutate(
+      { id: s.id, expected_payload: unique },
+      {
+        onSuccess: () => {
+          toast.success(`Removed ${arr.length - unique.length} duplicate fact(s)`);
+          if (expandedId === s.id) setExpectedText(JSON.stringify(unique, null, 2));
+        },
+      },
+    );
   };
 
   // Editable-table helpers (operate on the shared expectedText).
@@ -477,7 +583,9 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
               const expectedArr = Array.isArray(s.expected_payload) ? (s.expected_payload as unknown[]) : null;
               const routedCount = (s.extracted_payload as { routed_types?: string[] } | null)?.routed_types?.length;
               const diffCount = showDiff
-                ? countRowDiffs(facts?.map((f) => f.data) ?? [], (s.expected_payload as Record<string, unknown>[]) ?? [], attrs)
+                ? alignFacts(facts?.map((f) => f.data) ?? [], (s.expected_payload as FactRow[]) ?? [], attrs).filter(
+                    (p) => p.kind !== "same",
+                  ).length
                 : 0;
 
               const expectedEditor = (
@@ -802,6 +910,14 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                       onClick={() => setExpectedFromExtracted(s)}
                                     >
                                       Set from extraction
+                                    </TipButton>
+                                    <TipButton
+                                      tip="Remove byte-identical duplicate facts from Expected"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => dedupeExpected(s)}
+                                    >
+                                      De-dupe
                                     </TipButton>
                                     <TipButton
                                       tip="Save these expected facts as the document's gold"
