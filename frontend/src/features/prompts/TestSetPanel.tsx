@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useDocuments } from "@/features/documents/api";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,13 @@ import {
   useTestSampleActions,
   useTestSamples,
 } from "./api";
+
+/** Render one attribute value into a table cell. */
+function cell(v: unknown) {
+  if (v === null || v === undefined) return <span className="text-muted-foreground">—</span>;
+  if (typeof v === "object") return <code className="text-[11px]">{JSON.stringify(v)}</code>;
+  return String(v);
+}
 
 /** Labeled test set for a classifier or extractor (design §8.3): add documents,
  * label the expected value, dry-run the selected version, and expand a sample to
@@ -39,6 +47,14 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
   const isClassifier = def.kind === "classifier";
   const types = useMemo(
     () => (isClassifier ? ((version?.taxonomy as { type: string }[] | undefined)?.map((t) => t.type) ?? []) : []),
+    [isClassifier, version],
+  );
+  // The extractor's "attributes to extract" (schema properties) → result columns.
+  const attrs = useMemo(
+    () =>
+      isClassifier
+        ? []
+        : Object.keys((version?.json_schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}),
     [isClassifier, version],
   );
   const parsedDocs = useMemo(() => (docs.data?.results ?? []).filter((d) => d.has_text), [docs.data]);
@@ -184,6 +200,28 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
             {samples.data?.map((s) => {
               const r = results[s.id];
               const open = expandedId === s.id;
+              const expectedEditor = (
+                <div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium">Expected — JSON</span>
+                    {!isClassifier && (
+                      <Button variant="outline" size="sm" onClick={() => setExpectedFromRun(s)}>
+                        Set from run
+                      </Button>
+                    )}
+                  </div>
+                  <Textarea
+                    className="h-64 font-mono text-xs"
+                    value={expectedText}
+                    onChange={(e) => setExpectedText(e.target.value)}
+                    placeholder={isClassifier ? '["lab_report"]' : '[{ "test_name": "…" }]'}
+                  />
+                  <Button size="sm" className="mt-1" onClick={() => saveExpected(s)}>
+                    <Save />
+                    Save
+                  </Button>
+                </div>
+              );
               return (
                 <Fragment key={s.id}>
                   <TableRow className="align-top">
@@ -272,68 +310,102 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                   {open && (
                     <TableRow>
                       <TableCell colSpan={4} className="bg-muted/30">
-                        <div className="grid gap-4 lg:grid-cols-2">
-                          {/* extracted results (this run) */}
-                          <div>
-                            <div className="mb-1 text-xs font-medium">
-                              Extracted results{!isClassifier && r?.facts ? ` (${r.facts.length})` : ""}
-                            </div>
-                            {!r ? (
-                              <p className="text-xs text-muted-foreground">Run the test set to see the extraction.</p>
-                            ) : isClassifier ? (
-                              <div className="space-y-1 text-xs">
-                                <div className="text-muted-foreground">
-                                  outcome: {r.outcome} · routed: {r.routed_types?.join(", ") || "—"}
+                        {isClassifier ? (
+                          <Tabs defaultValue="result">
+                            <TabsList>
+                              <TabsTrigger value="result">Result</TabsTrigger>
+                              <TabsTrigger value="expected">Expected</TabsTrigger>
+                            </TabsList>
+                            <TabsContent value="result" className="mt-3">
+                              {!r ? (
+                                <p className="text-xs text-muted-foreground">Run the test set to see results.</p>
+                              ) : (
+                                <div className="space-y-1 text-xs">
+                                  <div className="text-muted-foreground">
+                                    outcome: {r.outcome} · routed: {r.routed_types?.join(", ") || "—"}
+                                  </div>
+                                  <ul className="space-y-0.5">
+                                    {r.scores?.map((sc, i) => (
+                                      <li key={i} className="text-muted-foreground">
+                                        {sc.type}: {sc.confidence?.toFixed?.(2) ?? sc.confidence}
+                                      </li>
+                                    ))}
+                                  </ul>
                                 </div>
-                                <ul className="space-y-0.5">
-                                  {r.scores?.map((sc, i) => (
-                                    <li key={i} className="text-muted-foreground">
-                                      {sc.type}: {sc.confidence?.toFixed?.(2) ?? sc.confidence}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            ) : (
-                              <ul className="max-h-72 space-y-1 overflow-auto">
-                                {r.facts?.map((f, i) => (
-                                  <li key={i} className="rounded-md border bg-background p-1.5 text-xs">
-                                    <code className="block break-all">{JSON.stringify(f.data)}</code>
-                                    <div className="mt-0.5 text-muted-foreground">
-                                      “{f.snippet}”
-                                      {f.resolved ? "" : " · unresolved span"}
-                                      {typeof f.confidence === "number" ? ` · ${f.confidence.toFixed(2)}` : ""}
-                                    </div>
-                                  </li>
-                                ))}
-                                {r.facts && r.facts.length === 0 && (
-                                  <li className="text-xs text-muted-foreground">No facts extracted.</li>
-                                )}
-                              </ul>
-                            )}
-                          </div>
-
-                          {/* expected editor */}
-                          <div>
-                            <div className="mb-1 flex items-center justify-between gap-2">
-                              <span className="text-xs font-medium">Expected — JSON</span>
-                              {!isClassifier && (
-                                <Button variant="outline" size="sm" onClick={() => setExpectedFromRun(s)}>
-                                  Set from run
-                                </Button>
                               )}
-                            </div>
-                            <Textarea
-                              className="h-64 font-mono text-xs"
-                              value={expectedText}
-                              onChange={(e) => setExpectedText(e.target.value)}
-                              placeholder={isClassifier ? '["lab_report"]' : '[{ "test_name": "…" }]'}
-                            />
-                            <Button size="sm" className="mt-1" onClick={() => saveExpected(s)}>
-                              <Save />
-                              Save
-                            </Button>
-                          </div>
-                        </div>
+                            </TabsContent>
+                            <TabsContent value="expected" className="mt-3">
+                              {expectedEditor}
+                            </TabsContent>
+                          </Tabs>
+                        ) : (
+                          <Tabs defaultValue="results">
+                            <TabsList>
+                              <TabsTrigger value="results">
+                                Extracted results{r?.facts ? ` (${r.facts.length})` : ""}
+                              </TabsTrigger>
+                              <TabsTrigger value="json">Extracted JSON</TabsTrigger>
+                              <TabsTrigger value="expected">Expected</TabsTrigger>
+                            </TabsList>
+
+                            <TabsContent value="results" className="mt-3">
+                              {!r ? (
+                                <p className="text-xs text-muted-foreground">Run the test set to see the extraction.</p>
+                              ) : !r.facts?.length ? (
+                                <p className="text-xs text-muted-foreground">No facts extracted.</p>
+                              ) : (
+                                <div className="max-h-72 overflow-auto rounded-md border bg-background">
+                                  <table className="w-full text-xs">
+                                    <thead className="sticky top-0 bg-muted">
+                                      <tr className="border-b">
+                                        <th className="px-2 py-1 text-left font-medium text-muted-foreground">#</th>
+                                        {attrs.map((a) => (
+                                          <th key={a} className="px-2 py-1 text-left font-medium">
+                                            {a}
+                                          </th>
+                                        ))}
+                                        <th className="px-2 py-1 text-left font-medium text-muted-foreground">source</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {r.facts.map((f, i) => (
+                                        <tr key={i} className="border-b align-top last:border-0">
+                                          <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
+                                          {attrs.map((a) => (
+                                            <td key={a} className="px-2 py-1">
+                                              {cell(f.data[a])}
+                                            </td>
+                                          ))}
+                                          <td
+                                            className="max-w-[16rem] truncate px-2 py-1 text-muted-foreground"
+                                            title={f.snippet}
+                                          >
+                                            “{f.snippet}”
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                              {attrs.length === 0 && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  This version's schema defines no attributes — see the Extractors editor.
+                                </p>
+                              )}
+                            </TabsContent>
+
+                            <TabsContent value="json" className="mt-3">
+                              <pre className="max-h-72 overflow-auto rounded-md bg-background p-2 font-mono text-xs">
+                                {JSON.stringify(r?.facts?.map((f) => f.data) ?? [], null, 2)}
+                              </pre>
+                            </TabsContent>
+
+                            <TabsContent value="expected" className="mt-3">
+                              {expectedEditor}
+                            </TabsContent>
+                          </Tabs>
+                        )}
                       </TableCell>
                     </TableRow>
                   )}
