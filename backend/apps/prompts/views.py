@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from apps.accounts.permissions import IsPromptAuthor
 
 from .lint.linter import lint_version
-from .models import PromptDefinition, PromptTestSample, PromptVersion
+from .models import PromptDefinition, PromptKind, PromptTestSample, PromptVersion
 from .serializers import (
     PromptDefinitionSerializer,
     PromptTestSampleSerializer,
@@ -68,11 +68,38 @@ class PromptDefinitionViewSet(viewsets.ModelViewSet):
 
 
 class PromptVersionViewSet(
-    mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet
+    mixins.RetrieveModelMixin, mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet
 ):
     queryset = PromptVersion.objects.select_related("definition").all()
     serializer_class = PromptVersionSerializer
     permission_classes = [IsPromptAuthor]
+
+    @staticmethod
+    def _is_referenced(version) -> bool:
+        """Has this version produced any recorded classification/extraction?
+        (`*_version_id` are soft refs — deleting would orphan provenance.)"""
+        from apps.documents.models import DocumentClassification, ExtractionRecord
+
+        if version.definition.kind == PromptKind.CLASSIFIER:
+            return DocumentClassification.objects.filter(classifier_version_id=version.id).exists()
+        return ExtractionRecord.objects.filter(extractor_version_id=version.id).exists()
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete a draft or published version. Guards (design §8): the active
+        version can't be deleted (activate another first), and a version that
+        produced records is kept for reproducibility."""
+        version = self.get_object()
+        if version.definition.active_version_id == version.id:
+            return Response(
+                {"detail": "This version is active — activate another version before deleting it."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if self._is_referenced(version):
+            return Response(
+                {"detail": "This version produced records and is kept for reproducibility; it can't be deleted."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     def _lint(self, version):
         d = version.definition
@@ -114,7 +141,11 @@ class PromptVersionViewSet(
         from apps.pipeline.dryrun import dry_run_version
 
         version = self.get_object()
-        samples = PromptTestSample.objects.select_related("document").all()
+        # Only this definition's samples; optionally a selected subset.
+        samples = PromptTestSample.objects.select_related("document").filter(definition=version.definition_id)
+        ids = request.data.get("sample_ids")
+        if ids:
+            samples = samples.filter(id__in=ids)
         return Response({"results": dry_run_version(version, samples)})
 
 
@@ -122,6 +153,13 @@ class PromptTestSampleViewSet(viewsets.ModelViewSet):
     queryset = PromptTestSample.objects.all().order_by("-created_at")
     serializer_class = PromptTestSampleSerializer
     permission_classes = [IsPromptAuthor]
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related("document", "definition")
+        definition = self.request.query_params.get("definition")
+        if definition:
+            qs = qs.filter(definition_id=definition)
+        return qs
 
     def perform_create(self, serializer):
         user = self.request.user

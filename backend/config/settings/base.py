@@ -202,6 +202,14 @@ GOOGLE_CLOUD_PROJECT = env("GOOGLE_CLOUD_PROJECT", default="")
 VERTEX_LOCATION = env("VERTEX_LOCATION", default="us-central1")
 # "gla" (API key) or "vertex" (in-GCP, BAA). Defaults to gla for dev.
 GEMINI_BACKEND = env("GEMINI_BACKEND", default="gla")
+# Sampling settings for reproducibility (#50): default to greedy decoding
+# (temperature 0) with a fixed seed so re-running the same version over the same
+# document yields stable facts. Overridable per PromptVersion via `params`
+# (`temperature`, `seed`, `top_p`, `top_k`, `max_tokens`). NB: even at temp 0 +
+# seed, gemini is not bit-for-bit deterministic (server-side batching) — this
+# minimises, not eliminates, run-to-run drift.
+LLM_TEMPERATURE = env.float("LLM_TEMPERATURE", default=0.0)
+LLM_SEED = env.int("LLM_SEED", default=42)
 # Optional override for the classifier's LLM boundary (dotted path to a
 # classify_scores(version, text, *, model=None) callable). Empty → the real
 # Pydantic AI agent (apps.prompts.agents.classify_scores). Tests point this at a

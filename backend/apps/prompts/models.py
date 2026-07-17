@@ -75,11 +75,25 @@ class PromptVersion(models.Model):
 
 class PromptTestSample(models.Model):
     """A curated, already-parsed document used to dry-run draft versions (design
-    §8.3). `expected_payload` is optional gold for a pass/fail signal."""
+    §8.3). Scoped to one definition (a classifier or an extractor).
 
+    ``expected_payload`` is the optional gold, interpreted by the definition kind:
+    a **classifier** sample's gold is a list of expected type slugs (e.g.
+    ``["lab_report"]``); an **extractor** sample's gold is a list of expected fact
+    ``data`` objects."""
+
+    definition = models.ForeignKey(
+        "PromptDefinition", on_delete=models.CASCADE, related_name="test_samples", null=True, blank=True
+    )
     document = models.ForeignKey("documents.SourceDocument", on_delete=models.CASCADE, related_name="+")
     label = models.CharField(max_length=128, blank=True, default="")
-    expected_payload = models.JSONField(null=True, blank=True)  # optional gold (list of fact data)
+    expected_payload = models.JSONField(null=True, blank=True)  # optional gold (by kind, see above)
+    # Last saved extraction for this sample (Extract): classifier → the result
+    # object; extractor → the list of facts. Kept so it survives reloads and can
+    # be compared against / copied into `expected_payload`.
+    extracted_payload = models.JSONField(null=True, blank=True)
+    extracted_version_id = models.PositiveIntegerField(null=True, blank=True)
+    extracted_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True, default="")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"

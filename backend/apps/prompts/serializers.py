@@ -33,7 +33,25 @@ class PromptDefinitionSerializer(serializers.ModelSerializer):
 
 
 class PromptTestSampleSerializer(serializers.ModelSerializer):
+    document_filename = serializers.CharField(source="document.original_filename", read_only=True)
+    document_has_text = serializers.SerializerMethodField()
+    definition_kind = serializers.CharField(source="definition.kind", read_only=True)
+
     class Meta:
         model = PromptTestSample
-        fields = ("id", "document", "label", "expected_payload", "notes", "created_by", "created_at")
-        read_only_fields = ("id", "created_by", "created_at")
+        fields = (
+            "id", "definition", "document", "document_filename", "document_has_text",
+            "definition_kind", "label", "expected_payload",
+            "extracted_payload", "extracted_version_id", "extracted_at",
+            "notes", "created_by", "created_at",
+        )
+        read_only_fields = (
+            "id", "document_filename", "document_has_text", "definition_kind",
+            "extracted_payload", "extracted_version_id", "extracted_at", "created_by", "created_at",
+        )
+        extra_kwargs = {"definition": {"required": True}}
+
+    def get_document_has_text(self, obj) -> bool:
+        from apps.documents.models import DocumentText
+
+        return DocumentText.objects.filter(document_id=obj.document_id).exists()

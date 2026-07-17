@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, FlaskConical, Lock, Pencil, Plus, Save, Send, Star, XCircle } from "lucide-react";
+import { CheckCircle2, FlaskConical, Lock, Pencil, Plus, Save, Send, Star, Trash2, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -135,9 +135,10 @@ export function VersionToolbar({ def, versions, selVersion, onSelect, actions, o
             variant="outline"
             size="sm"
             onClick={() =>
-              actions.dryRun.mutate(selVersion.id, {
-                onSuccess: (d: { results: unknown[] }) => setDryRows(d.results),
-              })
+              actions.dryRun.mutate(
+                { id: selVersion.id },
+                { onSuccess: (d: { results: unknown[] }) => setDryRows(d.results) },
+              )
             }
           >
             <FlaskConical />
@@ -161,6 +162,27 @@ export function VersionToolbar({ def, versions, selVersion, onSelect, actions, o
               Publish
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:bg-destructive/10"
+            onClick={() => {
+              if (!window.confirm(`Delete v${selVersion.version} (${selVersion.status})? This can't be undone.`)) return;
+              actions.deleteVersion.mutate(selVersion.id, {
+                onSuccess: () => {
+                  onSelect(null);
+                  toast.success("Version deleted");
+                },
+                onError: (err) => {
+                  const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+                  toast.error(detail ?? "Delete failed");
+                },
+              });
+            }}
+          >
+            <Trash2 />
+            Delete
+          </Button>
         </div>
       )}
 
