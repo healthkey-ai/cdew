@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useDocuments } from "@/features/documents/api";
 import { cn } from "@/lib/utils";
 import {
-  type DryRunRow,
+  type DryRunFact,
   type PromptDefinition,
   type PromptVersion,
   type TestSample,
@@ -22,7 +22,17 @@ import {
   useTestSamples,
 } from "./api";
 
-/** Render one attribute value into a table cell. */
+/** Best-effort coerce a table-cell string to a JSON value (140 → number, else string). */
+const coerce = (v: string): unknown => {
+  if (v === "") return "";
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+};
+
+/** Render one attribute value into a read-only table cell. */
 function cell(v: unknown) {
   if (v === null || v === undefined) return <span className="text-muted-foreground">—</span>;
   if (typeof v === "object") return <code className="text-[11px]">{JSON.stringify(v)}</code>;
@@ -68,15 +78,14 @@ function factsTable(rows: Record<string, unknown>[], attrs: string[], sources?: 
 }
 
 /** Labeled test set for a classifier or extractor (design §8.3): add documents,
- * label the expected value, dry-run the selected version, and expand a sample to
- * inspect the extracted results and edit its expected value. */
+ * Extract (whole set or one document) to save the extraction, then compare and
+ * edit the Expected value (as JSON or in the table). */
 export function TestSetPanel({ def, version }: { def: PromptDefinition; version: PromptVersion | null }) {
   const samples = useTestSamples(def.id);
   const sactions = useTestSampleActions(def.id);
   const dryRun = usePromptActions(def.id).dryRun;
   const docs = useDocuments();
 
-  const [results, setResults] = useState<Record<number, DryRunRow>>({});
   const [docId, setDocId] = useState("");
   const [label, setLabel] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -96,11 +105,33 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
     [isClassifier, version],
   );
   const parsedDocs = useMemo(() => (docs.data?.results ?? []).filter((d) => d.has_text), [docs.data]);
-  // value → label map so the Select trigger shows the filename, not the id.
   const docItems = useMemo(
     () => Object.fromEntries(parsedDocs.map((d) => [String(d.id), d.original_filename || `doc#${d.id}`])),
     [parsedDocs],
   );
+
+  // Expected rows parsed from the editor text (null = the JSON isn't a valid array).
+  const expectedRows = useMemo<Record<string, unknown>[] | null>(() => {
+    try {
+      const v = JSON.parse(expectedText || "[]");
+      return Array.isArray(v) ? (v as Record<string, unknown>[]) : null;
+    } catch {
+      return null;
+    }
+  }, [expectedText]);
+
+  const extractedFacts = (s: TestSample) => (s.extracted_payload as DryRunFact[] | null) ?? null;
+
+  const passOf = (s: TestSample): boolean | undefined => {
+    if (s.expected_payload == null || s.extracted_payload == null) return undefined;
+    if (isClassifier) {
+      const routed = new Set((s.extracted_payload as { routed_types?: string[] }).routed_types ?? []);
+      const exp = new Set(s.expected_payload as string[]);
+      return routed.size === exp.size && [...routed].every((t) => exp.has(t));
+    }
+    const facts = (extractedFacts(s) ?? []).map((f) => f.data);
+    return JSON.stringify(facts) === JSON.stringify(s.expected_payload);
+  };
 
   const addSample = () =>
     sactions.create.mutate(
@@ -114,26 +145,26 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       },
     );
 
-  const runAll = () => {
+  const extract = (sampleIds?: number[]) => {
     if (!version) return;
-    dryRun.mutate(version.id, {
-      onSuccess: (d) => {
-        const by: Record<number, DryRunRow> = {};
-        d.results.forEach((r) => (by[r.sample_id] = r));
-        setResults(by);
-        const scored = d.results.filter((r) => r.passed !== undefined);
-        if (scored.length) {
-          const pass = scored.filter((r) => r.passed).length;
-          toast[pass === scored.length ? "success" : "info"](`${pass}/${scored.length} passed`);
-        } else {
-          toast.info("Ran — expand a row to see results, then set the expected value");
-        }
+    dryRun.mutate(
+      { id: version.id, sampleIds },
+      {
+        onSuccess: (d) => {
+          const scored = d.results.filter((r) => r.passed !== undefined);
+          if (scored.length) {
+            const pass = scored.filter((r) => r.passed).length;
+            toast[pass === scored.length ? "success" : "info"](`${pass}/${scored.length} passed`);
+          } else {
+            toast.success(sampleIds ? "Extracted" : "Extracted all");
+          }
+        },
+        onError: (err) => {
+          const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+          toast.error(detail ?? "Extract failed — is the LLM configured for this environment?");
+        },
       },
-      onError: (err) => {
-        const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-        toast.error(detail ?? "Dry-run failed — is the LLM configured for this environment?");
-      },
-    });
+    );
   };
 
   const toggle = (s: TestSample) => {
@@ -152,18 +183,18 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
     sactions.update.mutate({ id: s.id, expected_payload: [...cur] });
   };
 
-  const setExpectedFromRun = (s: TestSample) => {
-    const row = results[s.id];
-    if (!row?.facts) {
-      toast.error("Run the test set first");
+  const setExpectedFromExtracted = (s: TestSample) => {
+    const facts = extractedFacts(s);
+    if (!facts) {
+      toast.error("Extract this document first");
       return;
     }
-    const expected = row.facts.map((f) => f.data);
+    const expected = facts.map((f) => f.data);
     sactions.update.mutate(
       { id: s.id, expected_payload: expected },
       {
         onSuccess: () => {
-          toast.success("Expected set from current output");
+          toast.success("Expected set from extraction");
           if (expandedId === s.id) setExpectedText(JSON.stringify(expected, null, 2));
         },
       },
@@ -183,20 +214,37 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
     sactions.update.mutate({ id: s.id, expected_payload: payload }, { onSuccess: () => toast.success("Expected saved") });
   };
 
-  const passBadge = (r?: DryRunRow) =>
-    !r || r.passed === undefined ? null : (
-      <Badge variant={r.passed ? "secondary" : "destructive"} className={r.passed ? "text-success" : ""}>
-        {r.passed ? "pass" : "fail"}
+  // Editable-table helpers (operate on the shared expectedText).
+  const setExpectedCell = (ri: number, attr: string, value: string) => {
+    if (expectedRows === null) return;
+    setExpectedText(
+      JSON.stringify(
+        expectedRows.map((row, i) => (i === ri ? { ...row, [attr]: coerce(value) } : row)),
+        null,
+        2,
+      ),
+    );
+  };
+  const addExpectedRow = () => setExpectedText(JSON.stringify([...(expectedRows ?? []), {}], null, 2));
+  const removeExpectedRow = (ri: number) =>
+    expectedRows !== null && setExpectedText(JSON.stringify(expectedRows.filter((_, i) => i !== ri), null, 2));
+
+  const passBadge = (s: TestSample) => {
+    const p = passOf(s);
+    return p === undefined ? null : (
+      <Badge variant={p ? "secondary" : "destructive"} className={p ? "text-success" : ""}>
+        {p ? "pass" : "fail"}
       </Badge>
     );
+  };
 
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle>Test set{samples.data ? ` (${samples.data.length})` : ""}</CardTitle>
-        <Button size="sm" onClick={runAll} disabled={!version || !samples.data?.length || dryRun.isPending}>
+        <Button size="sm" onClick={() => extract()} disabled={!version || !samples.data?.length || dryRun.isPending}>
           {dryRun.isPending ? <Loader2 className="animate-spin" /> : <FlaskConical />}
-          {dryRun.isPending ? "Running…" : "Run test set"}
+          {dryRun.isPending ? "Extracting…" : "Extract"}
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -231,20 +279,21 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
               <TableHead>Document</TableHead>
               <TableHead>Expected</TableHead>
               <TableHead>Result</TableHead>
-              <TableHead className="w-10" />
+              <TableHead className="w-16 text-right" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {samples.data?.map((s) => {
-              const r = results[s.id];
               const open = expandedId === s.id;
+              const facts = extractedFacts(s);
+
               const expectedEditor = (
                 <div>
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <span className="text-xs font-medium">Expected — JSON</span>
                     {!isClassifier && (
-                      <Button variant="outline" size="sm" onClick={() => setExpectedFromRun(s)}>
-                        Set from run
+                      <Button variant="outline" size="sm" onClick={() => setExpectedFromExtracted(s)}>
+                        Set from extraction
                       </Button>
                     )}
                   </div>
@@ -260,6 +309,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                   </Button>
                 </div>
               );
+
               return (
                 <Fragment key={s.id}>
                   <TableRow className="align-top">
@@ -310,38 +360,46 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                       )}
                     </TableCell>
                     <TableCell>
-                      {!r ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : isClassifier ? (
-                        <div className="space-y-1">
-                          {passBadge(r)}
-                          <button onClick={() => toggle(s)} className="block text-xs text-muted-foreground hover:underline">
-                            routed: {r.routed_types?.join(", ") || "—"}
-                          </button>
-                          {!!r.missing?.length && (
-                            <div className="text-xs text-destructive">missing: {r.missing.join(", ")}</div>
-                          )}
-                          {!!r.extra?.length && <div className="text-xs text-warning">extra: {r.extra.join(", ")}</div>}
-                        </div>
+                      {!s.extracted_at ? (
+                        <span className="text-xs text-muted-foreground">not extracted</span>
                       ) : (
                         <div className="space-y-1">
-                          {passBadge(r)}
-                          <button onClick={() => toggle(s)} className="block text-xs text-muted-foreground hover:underline">
-                            {r.facts?.length ?? 0} facts extracted · view
+                          {passBadge(s)}
+                          <button
+                            onClick={() => toggle(s)}
+                            className="block text-xs text-muted-foreground hover:underline"
+                          >
+                            {isClassifier
+                              ? `routed: ${(s.extracted_payload as { routed_types?: string[] }).routed_types?.join(", ") || "—"}`
+                              : `${facts?.length ?? 0} facts`}{" "}
+                            · view
                           </button>
                         </div>
                       )}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8"
-                        aria-label="Remove sample"
-                        onClick={() => sactions.remove.mutate(s.id)}
-                      >
-                        <Trash2 className="text-destructive" />
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8"
+                          aria-label="Extract this document"
+                          title="Extract this document"
+                          disabled={!version || dryRun.isPending}
+                          onClick={() => extract([s.id])}
+                        >
+                          <FlaskConical />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8"
+                          aria-label="Remove sample"
+                          onClick={() => sactions.remove.mutate(s.id)}
+                        >
+                          <Trash2 className="text-destructive" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
 
@@ -355,19 +413,23 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                               <TabsTrigger value="expected">Expected</TabsTrigger>
                             </TabsList>
                             <TabsContent value="result" className="mt-3">
-                              {!r ? (
-                                <p className="text-xs text-muted-foreground">Run the test set to see results.</p>
+                              {!s.extracted_at ? (
+                                <p className="text-xs text-muted-foreground">Extract to see results.</p>
                               ) : (
                                 <div className="space-y-1 text-xs">
                                   <div className="text-muted-foreground">
-                                    outcome: {r.outcome} · routed: {r.routed_types?.join(", ") || "—"}
+                                    outcome: {(s.extracted_payload as { outcome?: string }).outcome} · routed:{" "}
+                                    {(s.extracted_payload as { routed_types?: string[] }).routed_types?.join(", ") ||
+                                      "—"}
                                   </div>
                                   <ul className="space-y-0.5">
-                                    {r.scores?.map((sc, i) => (
-                                      <li key={i} className="text-muted-foreground">
-                                        {sc.type}: {sc.confidence?.toFixed?.(2) ?? sc.confidence}
-                                      </li>
-                                    ))}
+                                    {(s.extracted_payload as { scores?: { type: string; confidence: number }[] }).scores?.map(
+                                      (sc, i) => (
+                                        <li key={i} className="text-muted-foreground">
+                                          {sc.type}: {sc.confidence?.toFixed?.(2) ?? sc.confidence}
+                                        </li>
+                                      ),
+                                    )}
                                   </ul>
                                 </div>
                               )}
@@ -379,9 +441,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                         ) : (
                           <Tabs defaultValue="extracted">
                             <TabsList>
-                              <TabsTrigger value="extracted">
-                                Extracted{r?.facts ? ` (${r.facts.length})` : ""}
-                              </TabsTrigger>
+                              <TabsTrigger value="extracted">Extracted{facts ? ` (${facts.length})` : ""}</TabsTrigger>
                               <TabsTrigger value="expected">Expected</TabsTrigger>
                             </TabsList>
 
@@ -392,51 +452,110 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                   <TabsTrigger value="json">JSON</TabsTrigger>
                                 </TabsList>
                                 <TabsContent value="table" className="mt-2">
-                                  {!r ? (
-                                    <p className="text-xs text-muted-foreground">Run the test set to see the extraction.</p>
-                                  ) : !r.facts?.length ? (
+                                  {!facts ? (
+                                    <p className="text-xs text-muted-foreground">Extract to see the results.</p>
+                                  ) : !facts.length ? (
                                     <p className="text-xs text-muted-foreground">No facts extracted.</p>
                                   ) : (
                                     factsTable(
-                                      r.facts.map((f) => f.data),
+                                      facts.map((f) => f.data),
                                       attrs,
-                                      r.facts.map((f) => f.snippet),
+                                      facts.map((f) => f.snippet),
                                     )
-                                  )}
-                                  {attrs.length === 0 && (
-                                    <p className="mt-1 text-xs text-muted-foreground">
-                                      This version's schema defines no attributes — see the Extractors editor.
-                                    </p>
                                   )}
                                 </TabsContent>
                                 <TabsContent value="json" className="mt-2">
                                   <pre className="max-h-72 overflow-auto rounded-md bg-background p-2 font-mono text-xs">
-                                    {JSON.stringify(r?.facts?.map((f) => f.data) ?? [], null, 2)}
+                                    {JSON.stringify(facts?.map((f) => f.data) ?? [], null, 2)}
                                   </pre>
                                 </TabsContent>
                               </Tabs>
                             </TabsContent>
 
                             <TabsContent value="expected" className="mt-3">
-                              <Tabs defaultValue="json">
+                              <Tabs defaultValue="table">
                                 <TabsList variant="line">
-                                  <TabsTrigger value="json">JSON</TabsTrigger>
                                   <TabsTrigger value="table">Table</TabsTrigger>
+                                  <TabsTrigger value="json">JSON</TabsTrigger>
                                 </TabsList>
+
+                                <TabsContent value="table" className="mt-2 space-y-2">
+                                  {expectedRows === null ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      The expected JSON isn't a valid array — fix it in the JSON tab.
+                                    </p>
+                                  ) : (
+                                    <div className="overflow-auto rounded-md border bg-background">
+                                      <table className="w-full text-xs">
+                                        <thead className="bg-muted">
+                                          <tr className="border-b">
+                                            {attrs.map((a) => (
+                                              <th key={a} className="px-2 py-1 text-left font-medium">
+                                                {a}
+                                              </th>
+                                            ))}
+                                            <th className="w-8" />
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {expectedRows.map((row, ri) => (
+                                            <tr key={ri} className="border-b last:border-0">
+                                              {attrs.map((a) => (
+                                                <td key={a} className="px-1 py-0.5">
+                                                  <Input
+                                                    className="h-7"
+                                                    value={
+                                                      row[a] == null
+                                                        ? ""
+                                                        : typeof row[a] === "object"
+                                                          ? JSON.stringify(row[a])
+                                                          : String(row[a])
+                                                    }
+                                                    onChange={(e) => setExpectedCell(ri, a, e.target.value)}
+                                                  />
+                                                </td>
+                                              ))}
+                                              <td className="px-1">
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  className="size-7"
+                                                  aria-label="Remove row"
+                                                  onClick={() => removeExpectedRow(ri)}
+                                                >
+                                                  <Trash2 className="size-3.5 text-destructive" />
+                                                </Button>
+                                              </td>
+                                            </tr>
+                                          ))}
+                                          {expectedRows.length === 0 && (
+                                            <tr>
+                                              <td colSpan={attrs.length + 1} className="px-2 py-3 text-center text-muted-foreground">
+                                                No expected facts yet.
+                                              </td>
+                                            </tr>
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button variant="outline" size="sm" onClick={addExpectedRow}>
+                                      <Plus />
+                                      Row
+                                    </Button>
+                                    <Button variant="outline" size="sm" onClick={() => setExpectedFromExtracted(s)}>
+                                      Set from extraction
+                                    </Button>
+                                    <Button size="sm" onClick={() => saveExpected(s)}>
+                                      <Save />
+                                      Save
+                                    </Button>
+                                  </div>
+                                </TabsContent>
+
                                 <TabsContent value="json" className="mt-2">
                                   {expectedEditor}
-                                </TabsContent>
-                                <TabsContent value="table" className="mt-2">
-                                  {(() => {
-                                    const rows = (s.expected_payload as Record<string, unknown>[] | null) ?? [];
-                                    return rows.length ? (
-                                      factsTable(rows, attrs)
-                                    ) : (
-                                      <p className="text-xs text-muted-foreground">
-                                        No expected facts yet — add them in the JSON tab or “Set from run”.
-                                      </p>
-                                    );
-                                  })()}
                                 </TabsContent>
                               </Tabs>
                             </TabsContent>
@@ -460,8 +579,8 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
 
         <p className="text-xs text-muted-foreground">
           {isClassifier
-            ? "Expected = the types this document should route to. Run, then expand a row to inspect scores and edit it."
-            : "Expected = the facts this document should yield. Run to see the extraction, expand a row to inspect it, then “Set from run” / edit the JSON."}
+            ? "Add documents, Extract to run the classifier, then set the Expected types to compare (pass/fail)."
+            : "Add documents, Extract (whole set or per document) to save the extraction, then set the Expected facts — “Set from extraction”, or edit them in the table or JSON."}
         </p>
       </CardContent>
     </Card>

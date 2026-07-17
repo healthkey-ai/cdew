@@ -41,9 +41,14 @@ class PromptTestSampleSerializer(serializers.ModelSerializer):
         model = PromptTestSample
         fields = (
             "id", "definition", "document", "document_filename", "document_has_text",
-            "definition_kind", "label", "expected_payload", "notes", "created_by", "created_at",
+            "definition_kind", "label", "expected_payload",
+            "extracted_payload", "extracted_version_id", "extracted_at",
+            "notes", "created_by", "created_at",
         )
-        read_only_fields = ("id", "document_filename", "document_has_text", "definition_kind", "created_by", "created_at")
+        read_only_fields = (
+            "id", "document_filename", "document_has_text", "definition_kind",
+            "extracted_payload", "extracted_version_id", "extracted_at", "created_by", "created_at",
+        )
         extra_kwargs = {"definition": {"required": True}}
 
     def get_document_has_text(self, obj) -> bool:

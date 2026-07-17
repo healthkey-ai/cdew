@@ -52,6 +52,9 @@ export interface TestSample {
   definition_kind: "classifier" | "extractor";
   label: string;
   expected_payload: unknown | null;
+  extracted_payload: unknown | null;
+  extracted_version_id: number | null;
+  extracted_at: string | null;
   notes: string;
 }
 
@@ -130,9 +133,12 @@ export function usePromptActions(defId: number | null) {
         (await api.post(`${P}/definitions/${defId}/activate/`, { version_id: versionId })).data,
       onSuccess: invalidate,
     }),
+    // "Extract": run the version over the definition's test set (or a subset),
+    // saving each sample's extracted_payload. Invalidates the test set to reload it.
     dryRun: useMutation({
-      mutationFn: async (id: number) =>
-        (await api.post<{ results: DryRunRow[] }>(`${P}/versions/${id}/dry-run/`)).data,
+      mutationFn: async ({ id, sampleIds }: { id: number; sampleIds?: number[] }) =>
+        (await api.post<{ results: DryRunRow[] }>(`${P}/versions/${id}/dry-run/`, sampleIds ? { sample_ids: sampleIds } : {})).data,
+      onSuccess: () => qc.invalidateQueries({ queryKey: ["prompts", "test-set", defId] }),
     }),
     deleteVersion: useMutation({
       mutationFn: async (id: number) => {

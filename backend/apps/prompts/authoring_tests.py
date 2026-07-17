@@ -188,3 +188,26 @@ class PromptTestSetTests(APITestCase):
         row = self._dry_run(self.classifier)[0]
         assert row["passed"] is False
         assert "bogus_type" in row["missing"]
+
+    def test_extract_saves_extracted_payload(self):
+        s = self._sample(self.lab)
+        self._dry_run(self.lab)  # whole set
+        s.refresh_from_db()
+        assert s.extracted_payload is not None
+        assert s.extracted_version_id == self.lab.active_version_id
+        assert s.extracted_at is not None
+
+    def test_extract_single_sample_by_id(self):
+        a = self._sample(self.lab, label="a")
+        b = self._sample(self.lab, label="b")
+        r = self.client.post(
+            f"/api/v1/prompts/versions/{self.lab.active_version_id}/dry-run/",
+            {"sample_ids": [a.id]},
+            format="json",
+        )
+        assert r.status_code == 200, r.content
+        assert [row["sample_id"] for row in r.json()["results"]] == [a.id]
+        a.refresh_from_db()
+        b.refresh_from_db()
+        assert a.extracted_payload is not None
+        assert b.extracted_payload is None  # not selected → not extracted

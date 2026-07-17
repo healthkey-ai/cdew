@@ -88,6 +88,12 @@ class PromptTestSample(models.Model):
     document = models.ForeignKey("documents.SourceDocument", on_delete=models.CASCADE, related_name="+")
     label = models.CharField(max_length=128, blank=True, default="")
     expected_payload = models.JSONField(null=True, blank=True)  # optional gold (by kind, see above)
+    # Last saved extraction for this sample (Extract): classifier → the result
+    # object; extractor → the list of facts. Kept so it survives reloads and can
+    # be compared against / copied into `expected_payload`.
+    extracted_payload = models.JSONField(null=True, blank=True)
+    extracted_version_id = models.PositiveIntegerField(null=True, blank=True)
+    extracted_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True, default="")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"

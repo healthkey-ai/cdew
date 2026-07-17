@@ -135,9 +135,10 @@ export function VersionToolbar({ def, versions, selVersion, onSelect, actions, o
             variant="outline"
             size="sm"
             onClick={() =>
-              actions.dryRun.mutate(selVersion.id, {
-                onSuccess: (d: { results: unknown[] }) => setDryRows(d.results),
-              })
+              actions.dryRun.mutate(
+                { id: selVersion.id },
+                { onSuccess: (d: { results: unknown[] }) => setDryRows(d.results) },
+              )
             }
           >
             <FlaskConical />
