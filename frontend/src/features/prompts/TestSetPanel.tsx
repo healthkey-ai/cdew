@@ -679,9 +679,9 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                       {!s.extracted_at ? (
                         <span className="text-xs text-muted-foreground">not extracted</span>
                       ) : (
-                        <div className="space-y-1">
+                        <div className="flex items-center gap-2">
                           {passBadge(s)}
-                          <span className="block text-xs text-muted-foreground">
+                          <span className="text-xs text-muted-foreground">
                             {isClassifier
                               ? `routed: ${(s.extracted_payload as { routed_types?: string[] }).routed_types?.join(", ") || "—"}`
                               : `${facts?.length ?? 0} facts`}
