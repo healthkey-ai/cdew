@@ -4,10 +4,23 @@ Reuses the classify/extract LLM boundary but **persists nothing** — authors se
 per-sample results (facts + resolved spans, or classification scores) before
 publishing.
 """
+import json
+from collections import Counter
+
 from django.utils import timezone
 
 from .classify import _scores_fn, apply_taxonomy
 from .extract import _facts_fn, resolve_span
+
+
+def _facts_equal(extracted_data: list, expected) -> bool:
+    """Order-insensitive multiset equality (mirrors the frontend's `factsEqual`).
+    Facts are an unordered bag, so a reordering by the LLM isn't a mismatch; a
+    duplicated fact with no counterpart is."""
+    def key(d):
+        return json.dumps(d, sort_keys=True, default=str)
+
+    return Counter(map(key, extracted_data)) == Counter(map(key, expected or []))
 
 
 def _extractor_result(version, text):
@@ -54,7 +67,7 @@ def dry_run_version(version, samples) -> list[dict]:
             s.extracted_payload = facts
             if s.expected_payload is not None:
                 row["expected"] = s.expected_payload
-                row["passed"] = [f["data"] for f in facts] == s.expected_payload
+                row["passed"] = _facts_equal([f["data"] for f in facts], s.expected_payload)
         else:
             cls = _classifier_result(version, text, s.expected_payload)
             row.update(cls)

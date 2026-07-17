@@ -52,6 +52,11 @@ class PromptTestSampleSerializer(serializers.ModelSerializer):
         extra_kwargs = {"definition": {"required": True}}
 
     def get_document_has_text(self, obj) -> bool:
+        # Prefer the list/retrieve queryset's `_has_text` annotation (one query for
+        # the whole set); fall back to a lookup for paths without it (e.g. create).
+        annotated = getattr(obj, "_has_text", None)
+        if annotated is not None:
+            return annotated
         from apps.documents.models import DocumentText
 
         return DocumentText.objects.filter(document_id=obj.document_id).exists()

@@ -211,3 +211,32 @@ class PromptTestSetTests(APITestCase):
         b.refresh_from_db()
         assert a.extracted_payload is not None
         assert b.extracted_payload is None  # not selected → not extracted
+
+    def _extract_one(self, sample):
+        r = self.client.post(
+            f"/api/v1/prompts/versions/{self.lab.active_version_id}/dry-run/",
+            {"sample_ids": [sample.id]},
+            format="json",
+        )
+        assert r.status_code == 200, r.content
+        return r.json()["results"][0]
+
+    def test_extractor_pass_fail_is_order_insensitive(self):
+        # A two-fact doc so ordering is meaningful.
+        doc, _ = ingest_upload(
+            SimpleUploadedFile("two.txt", b"Hemoglobin 9.1 g/dL Sodium 140 mmol/L", content_type="text/plain"), "TWO"
+        )
+        parse_document(doc)
+        s = PromptTestSample.objects.create(definition=self.lab, document=doc)
+        gold = [f["data"] for f in self._extract_one(s)["facts"]]
+        assert len(gold) == 2  # sanity: both labs extracted
+
+        # Reversed gold → still a pass (facts are an unordered bag).
+        s.expected_payload = list(reversed(gold))
+        s.save()
+        assert self._extract_one(s)["passed"] is True
+
+        # A duplicated expected fact with no counterpart → fail (multiset, not set).
+        s.expected_payload = [*gold, gold[0]]
+        s.save()
+        assert self._extract_one(s)["passed"] is False
