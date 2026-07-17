@@ -79,6 +79,19 @@ function factsTable(rows: Record<string, unknown>[], attrs: string[], sources?: 
   );
 }
 
+/** Count fact indexes that differ between extracted and expected (a row present
+ * on only one side counts as a difference). Drives the Diff tab's count badge. */
+function countRowDiffs(extracted: Record<string, unknown>[], expected: Record<string, unknown>[], attrs: string[]) {
+  const n = Math.max(extracted.length, expected.length);
+  let c = 0;
+  for (let i = 0; i < n; i++) {
+    const a = extracted[i];
+    const b = expected[i];
+    if (!a || !b || attrs.some((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))) c++;
+  }
+  return c;
+}
+
 /** Row-by-row diff of extracted vs expected facts (design §8.3). Each fact index
  * yields two rows — extracted then expected — with differing cells highlighted.
  * A missing row on either side shows as "—" (a whole highlighted row). */
@@ -368,6 +381,12 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
               const facts = extractedFacts(s);
               // Extractor mismatch (both sides present and unequal) → offer a Diff tab.
               const showDiff = !isClassifier && passOf(s) === false;
+              // Per-tab counts. Expected: fact/type count; Result (classifier): routed types.
+              const expectedArr = Array.isArray(s.expected_payload) ? (s.expected_payload as unknown[]) : null;
+              const routedCount = (s.extracted_payload as { routed_types?: string[] } | null)?.routed_types?.length;
+              const diffCount = showDiff
+                ? countRowDiffs(facts?.map((f) => f.data) ?? [], (s.expected_payload as Record<string, unknown>[]) ?? [], attrs)
+                : 0;
 
               const expectedEditor = (
                 <div>
@@ -507,8 +526,10 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                         {isClassifier ? (
                           <Tabs defaultValue="result">
                             <TabsList>
-                              <TabsTrigger value="result">Result</TabsTrigger>
-                              <TabsTrigger value="expected">Expected</TabsTrigger>
+                              <TabsTrigger value="result">
+                                Result{routedCount === undefined ? "" : ` (${routedCount})`}
+                              </TabsTrigger>
+                              <TabsTrigger value="expected">Expected{expectedArr ? ` (${expectedArr.length})` : ""}</TabsTrigger>
                             </TabsList>
                             <TabsContent value="result" className="mt-3">
                               {!s.extracted_at ? (
@@ -540,10 +561,10 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                           <Tabs defaultValue={showDiff ? "diff" : "extracted"}>
                             <TabsList>
                               <TabsTrigger value="extracted">Extracted{facts ? ` (${facts.length})` : ""}</TabsTrigger>
-                              <TabsTrigger value="expected">Expected</TabsTrigger>
+                              <TabsTrigger value="expected">Expected{expectedArr ? ` (${expectedArr.length})` : ""}</TabsTrigger>
                               {showDiff && (
                                 <TabsTrigger value="diff" className="text-destructive data-active:text-destructive!">
-                                  Diff
+                                  Diff ({diffCount})
                                 </TabsTrigger>
                               )}
                             </TabsList>
