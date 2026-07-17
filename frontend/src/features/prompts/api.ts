@@ -74,6 +74,7 @@ export interface DryRunRow {
   facts?: DryRunFact[];
   expected?: unknown;
   // classifier
+  scores?: { type: string; confidence: number }[];
   routed_types?: string[];
   outcome?: string;
   reason?: string | null;
