@@ -681,15 +681,11 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                       ) : (
                         <div className="space-y-1">
                           {passBadge(s)}
-                          <button
-                            onClick={() => toggle(s)}
-                            className="block text-xs text-muted-foreground hover:underline"
-                          >
+                          <span className="block text-xs text-muted-foreground">
                             {isClassifier
                               ? `routed: ${(s.extracted_payload as { routed_types?: string[] }).routed_types?.join(", ") || "—"}`
-                              : `${facts?.length ?? 0} facts`}{" "}
-                            · view
-                          </button>
+                              : `${facts?.length ?? 0} facts`}
+                          </span>
                         </div>
                       )}
                     </TableCell>
