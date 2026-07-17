@@ -16,4 +16,10 @@ export default tseslint.config(
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },
+  {
+    // Vendored shadcn primitives export a component + its variants helper by
+    // design; the fast-refresh rule doesn't apply to files we don't hand-edit.
+    files: ["src/components/ui/**"],
+    rules: { "react-refresh/only-export-components": "off" },
+  },
 );

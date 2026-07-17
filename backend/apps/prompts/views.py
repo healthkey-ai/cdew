@@ -4,7 +4,7 @@ Lifecycle: create/clone a draft → edit → validate (advisory) → publish (en
 shape-lint, sets active) → activate an older version (rollback). Dry-run runs a
 version against the test set without persisting.
 """
-from django.db.models import Max
+from django.db.models import Exists, Max, OuterRef
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -155,7 +155,15 @@ class PromptTestSampleViewSet(viewsets.ModelViewSet):
     permission_classes = [IsPromptAuthor]
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related("document", "definition")
+        from apps.documents.models import DocumentText
+
+        # Annotate `has text?` once (avoids an N+1 in the serializer over the set).
+        qs = (
+            super()
+            .get_queryset()
+            .select_related("document", "definition")
+            .annotate(_has_text=Exists(DocumentText.objects.filter(document_id=OuterRef("document_id"))))
+        )
         definition = self.request.query_params.get("definition")
         if definition:
             qs = qs.filter(definition_id=definition)
