@@ -45,6 +45,24 @@ def default_model(version):
     return GoogleModel(name, provider=provider)
 
 
+def _model_settings(version):
+    """Sampling settings for a run (design §10, #50). Greedy decoding (temperature
+    0) with a fixed seed by default so re-running the same version over the same
+    document yields stable facts; overridable per version via ``params``
+    (``temperature``, ``seed``, ``top_p``, ``top_k``, ``max_tokens``)."""
+    from pydantic_ai.models.google import GoogleModelSettings
+
+    params = version.params or {}
+    kwargs = {
+        "temperature": params.get("temperature", settings.LLM_TEMPERATURE),
+        "seed": params.get("seed", settings.LLM_SEED),
+    }
+    for key in ("top_p", "top_k", "max_tokens"):
+        if key in params:
+            kwargs[key] = params[key]
+    return GoogleModelSettings(**kwargs)
+
+
 def _type_prompt(t: dict) -> str:
     """The per-type classification prompt (``prompt``; legacy rows use ``description``)."""
     return (t.get("prompt") or t.get("description") or "").strip()
@@ -73,6 +91,7 @@ def classify_scores(version, text: str, *, model=None) -> list[TypeScore]:
         model or default_model(version),
         output_type=ClassificationOutput,
         system_prompt=_system_prompt(version),
+        model_settings=_model_settings(version),
         retries=2,
     )
     max_chars = (version.params or {}).get("max_chars", 8000)
@@ -131,6 +150,7 @@ def extract_facts(version, text: str, *, model=None) -> list[dict]:
         model or default_model(version),
         output_type=output_model,
         system_prompt=_extraction_system_prompt(version),
+        model_settings=_model_settings(version),
         retries=2,
     )
     max_chars = (version.params or {}).get("max_chars", 12000)

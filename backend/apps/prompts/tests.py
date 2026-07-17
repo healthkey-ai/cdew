@@ -1,8 +1,30 @@
-from django.test import TestCase
+from types import SimpleNamespace
+
+from django.test import SimpleTestCase, TestCase
 from pydantic_ai.models.test import TestModel
 
-from apps.prompts.agents import TypeScore, classify_scores
+from apps.prompts.agents import TypeScore, _model_settings, classify_scores
 from apps.prompts.resolve import CLASSIFIER_KEY, get_active_classifier, resolve_extractors
+
+
+class ModelSettingsTests(SimpleTestCase):
+    """Sampling settings for reproducibility (#50)."""
+
+    def test_defaults_are_greedy_with_seed(self):
+        s = _model_settings(SimpleNamespace(params=None))
+        assert s["temperature"] == 0.0
+        assert s["seed"] == 42
+        assert "top_p" not in s  # only added when a version opts in
+
+    def test_params_override_defaults(self):
+        s = _model_settings(
+            SimpleNamespace(params={"temperature": 0.3, "seed": 7, "top_p": 0.9, "top_k": 40, "max_tokens": 1000})
+        )
+        assert s["temperature"] == 0.3
+        assert s["seed"] == 7
+        assert s["top_p"] == 0.9
+        assert s["top_k"] == 40
+        assert s["max_tokens"] == 1000
 
 
 class ResolveTests(TestCase):
