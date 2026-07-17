@@ -1,4 +1,4 @@
-import { type ComponentProps, Fragment, useMemo, useState } from "react";
+import { type ComponentProps, Fragment, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ChevronRight, FlaskConical, Loader2, Plus, Save, Trash2 } from "lucide-react";
 
@@ -24,6 +24,67 @@ import {
   useTestSamples,
 } from "./api";
 
+const DEFAULT_COL_W = 140;
+
+/** Per-column widths for the result tables, persisted for the browser session
+ * (sessionStorage, keyed per definition). Widths are keyed by column name so the
+ * same attribute stays in sync across the Extracted / Expected / Diff tables. */
+function useColWidths(key: number | string) {
+  const storeKey = `cdew:test-set-colw:${key}`;
+  const [widths, setWidths] = useState<Record<string, number>>(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(storeKey) || "{}");
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    sessionStorage.setItem(storeKey, JSON.stringify(widths));
+  }, [storeKey, widths]);
+
+  const drag = useRef<{ col: string; startX: number; startW: number } | null>(null);
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      setWidths((p) => ({ ...p, [d.col]: Math.max(56, d.startW + e.clientX - d.startX) }));
+    };
+    const up = () => {
+      drag.current = null;
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, []);
+
+  const startResize = (col: string, e: ReactMouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drag.current = { col, startX: e.clientX, startW: widths[col] ?? DEFAULT_COL_W };
+    document.body.style.cursor = "col-resize";
+  };
+  const widthOf = (col: string) => widths[col] ?? DEFAULT_COL_W;
+  return { widthOf, startResize };
+}
+type ColWidths = ReturnType<typeof useColWidths>;
+
+/** Drag handle on a resizable column's right edge. Requires a `relative` header cell. */
+function ColHandle({ col, cols }: { col: string; cols: ColWidths }) {
+  return (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      onMouseDown={(e) => cols.startResize(col, e)}
+      onClick={(e) => e.stopPropagation()}
+      className="absolute top-0 right-0 z-20 h-full w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/50"
+    />
+  );
+}
+
 /** Best-effort coerce a table-cell string to a JSON value (140 → number, else string). */
 const coerce = (v: string): unknown => {
   if (v === "") return "";
@@ -42,16 +103,30 @@ function cell(v: unknown) {
 }
 
 /** Render facts as rows × the extractor's attributes (+ optional source snippets). */
-function factsTable(rows: Record<string, unknown>[], attrs: string[], sources?: (string | undefined)[]) {
+function factsTable(
+  rows: Record<string, unknown>[],
+  attrs: string[],
+  cols: ColWidths,
+  sources?: (string | undefined)[],
+) {
+  const total = 40 + attrs.reduce((n, a) => n + cols.widthOf(a), 0) + (sources ? 256 : 0);
   return (
     <div className="max-h-72 overflow-auto rounded-md border bg-background">
-      <Table className="text-xs">
+      <Table className="table-fixed text-xs" style={{ width: total }}>
+        <colgroup>
+          <col style={{ width: 40 }} />
+          {attrs.map((a) => (
+            <col key={a} style={{ width: cols.widthOf(a) }} />
+          ))}
+          {sources && <col style={{ width: 256 }} />}
+        </colgroup>
         <TableHeader className="sticky top-0 z-10 bg-muted">
           <TableRow>
-            <TableHead className="h-8 w-8 text-muted-foreground">#</TableHead>
+            <TableHead className="h-8 text-muted-foreground">#</TableHead>
             {attrs.map((a) => (
-              <TableHead key={a} className="h-8">
+              <TableHead key={a} className="relative h-8 truncate">
                 {a}
+                <ColHandle col={a} cols={cols} />
               </TableHead>
             ))}
             {sources && <TableHead className="h-8 text-muted-foreground">source</TableHead>}
@@ -62,12 +137,12 @@ function factsTable(rows: Record<string, unknown>[], attrs: string[], sources?: 
             <TableRow key={i} className="align-top">
               <TableCell className="py-1 text-muted-foreground">{i + 1}</TableCell>
               {attrs.map((a) => (
-                <TableCell key={a} className="py-1">
+                <TableCell key={a} className="truncate py-1" title={String(data[a] ?? "")}>
                   {cell(data[a])}
                 </TableCell>
               ))}
               {sources && (
-                <TableCell className="max-w-[16rem] truncate py-1 text-muted-foreground" title={sources[i]}>
+                <TableCell className="truncate py-1 text-muted-foreground" title={sources[i]}>
                   {sources[i] ? `“${sources[i]}”` : "—"}
                 </TableCell>
               )}
@@ -95,8 +170,14 @@ function countRowDiffs(extracted: Record<string, unknown>[], expected: Record<st
 /** Row-by-row diff of extracted vs expected facts (design §8.3). Each fact index
  * yields two rows — extracted then expected — with differing cells highlighted.
  * A missing row on either side shows as "—" (a whole highlighted row). */
-function diffTable(extracted: Record<string, unknown>[], expected: Record<string, unknown>[], attrs: string[]) {
+function diffTable(
+  extracted: Record<string, unknown>[],
+  expected: Record<string, unknown>[],
+  attrs: string[],
+  cols: ColWidths,
+) {
   const n = Math.max(extracted.length, expected.length);
+  const total = 40 + 80 + attrs.reduce((m, a) => m + cols.widthOf(a), 0);
   const differs = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
   const line = (
     i: number,
@@ -114,7 +195,8 @@ function diffTable(extracted: Record<string, unknown>[], expected: Record<string
       {attrs.map((a) => (
         <TableCell
           key={a}
-          className={cn("py-1", differs(data?.[a], other?.[a]) && "bg-destructive/10 text-destructive")}
+          title={data ? String(data[a] ?? "") : ""}
+          className={cn("truncate py-1", differs(data?.[a], other?.[a]) && "bg-destructive/10 text-destructive")}
         >
           {data ? cell(data[a]) : <span className="text-muted-foreground">—</span>}
         </TableCell>
@@ -123,14 +205,22 @@ function diffTable(extracted: Record<string, unknown>[], expected: Record<string
   );
   return (
     <div className="max-h-96 overflow-auto rounded-md border bg-background">
-      <Table className="text-xs">
+      <Table className="table-fixed text-xs" style={{ width: total }}>
+        <colgroup>
+          <col style={{ width: 40 }} />
+          <col style={{ width: 80 }} />
+          {attrs.map((a) => (
+            <col key={a} style={{ width: cols.widthOf(a) }} />
+          ))}
+        </colgroup>
         <TableHeader className="sticky top-0 z-10 bg-muted">
           <TableRow>
-            <TableHead className="h-8 w-8 text-muted-foreground">#</TableHead>
-            <TableHead className="h-8 w-20 text-muted-foreground">side</TableHead>
+            <TableHead className="h-8 text-muted-foreground">#</TableHead>
+            <TableHead className="h-8 text-muted-foreground">side</TableHead>
             {attrs.map((a) => (
-              <TableHead key={a} className="h-8">
+              <TableHead key={a} className="relative h-8 truncate">
                 {a}
+                <ColHandle col={a} cols={cols} />
               </TableHead>
             ))}
           </TableRow>
@@ -167,6 +257,8 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
   const sactions = useTestSampleActions(def.id);
   const dryRun = usePromptActions(def.id).dryRun;
   const docs = useDocuments();
+  // Session-persisted column widths shared across the result tables (resizable).
+  const cols = useColWidths(def.id);
 
   const [docId, setDocId] = useState("");
   const [label, setLabel] = useState("");
@@ -584,6 +676,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                     factsTable(
                                       facts.map((f) => f.data),
                                       attrs,
+                                      cols,
                                       facts.map((f) => f.snippet),
                                     )
                                   )}
@@ -606,6 +699,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                   facts?.map((f) => f.data) ?? [],
                                   (s.expected_payload as Record<string, unknown>[]) ?? [],
                                   attrs,
+                                  cols,
                                 )}
                               </TabsContent>
                             )}
@@ -624,15 +718,25 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                     </p>
                                   ) : (
                                     <div className="overflow-auto rounded-md border bg-background">
-                                      <Table className="text-xs">
+                                      <Table
+                                        className="table-fixed text-xs"
+                                        style={{ width: attrs.reduce((m, a) => m + cols.widthOf(a), 0) + 44 }}
+                                      >
+                                        <colgroup>
+                                          {attrs.map((a) => (
+                                            <col key={a} style={{ width: cols.widthOf(a) }} />
+                                          ))}
+                                          <col style={{ width: 44 }} />
+                                        </colgroup>
                                         <TableHeader className="bg-muted">
                                           <TableRow>
                                             {attrs.map((a) => (
-                                              <TableHead key={a} className="h-8">
+                                              <TableHead key={a} className="relative h-8 truncate">
                                                 {a}
+                                                <ColHandle col={a} cols={cols} />
                                               </TableHead>
                                             ))}
-                                            <TableHead className="h-8 w-8" />
+                                            <TableHead className="h-8" />
                                           </TableRow>
                                         </TableHeader>
                                         <TableBody>
