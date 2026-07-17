@@ -29,6 +29,44 @@ function cell(v: unknown) {
   return String(v);
 }
 
+/** Render facts as rows × the extractor's attributes (+ optional source snippets). */
+function factsTable(rows: Record<string, unknown>[], attrs: string[], sources?: (string | undefined)[]) {
+  return (
+    <div className="max-h-72 overflow-auto rounded-md border bg-background">
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 bg-muted">
+          <tr className="border-b">
+            <th className="px-2 py-1 text-left font-medium text-muted-foreground">#</th>
+            {attrs.map((a) => (
+              <th key={a} className="px-2 py-1 text-left font-medium">
+                {a}
+              </th>
+            ))}
+            {sources && <th className="px-2 py-1 text-left font-medium text-muted-foreground">source</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((data, i) => (
+            <tr key={i} className="border-b align-top last:border-0">
+              <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
+              {attrs.map((a) => (
+                <td key={a} className="px-2 py-1">
+                  {cell(data[a])}
+                </td>
+              ))}
+              {sources && (
+                <td className="max-w-[16rem] truncate px-2 py-1 text-muted-foreground" title={sources[i]}>
+                  {sources[i] ? `“${sources[i]}”` : "—"}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** Labeled test set for a classifier or extractor (design §8.3): add documents,
  * label the expected value, dry-run the selected version, and expand a sample to
  * inspect the extracted results and edit its expected value. */
@@ -339,70 +377,68 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                             </TabsContent>
                           </Tabs>
                         ) : (
-                          <Tabs defaultValue="results">
+                          <Tabs defaultValue="extracted">
                             <TabsList>
-                              <TabsTrigger value="results">
-                                Extracted results{r?.facts ? ` (${r.facts.length})` : ""}
+                              <TabsTrigger value="extracted">
+                                Extracted{r?.facts ? ` (${r.facts.length})` : ""}
                               </TabsTrigger>
-                              <TabsTrigger value="json">Extracted JSON</TabsTrigger>
                               <TabsTrigger value="expected">Expected</TabsTrigger>
                             </TabsList>
 
-                            <TabsContent value="results" className="mt-3">
-                              {!r ? (
-                                <p className="text-xs text-muted-foreground">Run the test set to see the extraction.</p>
-                              ) : !r.facts?.length ? (
-                                <p className="text-xs text-muted-foreground">No facts extracted.</p>
-                              ) : (
-                                <div className="max-h-72 overflow-auto rounded-md border bg-background">
-                                  <table className="w-full text-xs">
-                                    <thead className="sticky top-0 bg-muted">
-                                      <tr className="border-b">
-                                        <th className="px-2 py-1 text-left font-medium text-muted-foreground">#</th>
-                                        {attrs.map((a) => (
-                                          <th key={a} className="px-2 py-1 text-left font-medium">
-                                            {a}
-                                          </th>
-                                        ))}
-                                        <th className="px-2 py-1 text-left font-medium text-muted-foreground">source</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {r.facts.map((f, i) => (
-                                        <tr key={i} className="border-b align-top last:border-0">
-                                          <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
-                                          {attrs.map((a) => (
-                                            <td key={a} className="px-2 py-1">
-                                              {cell(f.data[a])}
-                                            </td>
-                                          ))}
-                                          <td
-                                            className="max-w-[16rem] truncate px-2 py-1 text-muted-foreground"
-                                            title={f.snippet}
-                                          >
-                                            “{f.snippet}”
-                                          </td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              )}
-                              {attrs.length === 0 && (
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  This version's schema defines no attributes — see the Extractors editor.
-                                </p>
-                              )}
-                            </TabsContent>
-
-                            <TabsContent value="json" className="mt-3">
-                              <pre className="max-h-72 overflow-auto rounded-md bg-background p-2 font-mono text-xs">
-                                {JSON.stringify(r?.facts?.map((f) => f.data) ?? [], null, 2)}
-                              </pre>
+                            <TabsContent value="extracted" className="mt-3">
+                              <Tabs defaultValue="table">
+                                <TabsList variant="line">
+                                  <TabsTrigger value="table">Table</TabsTrigger>
+                                  <TabsTrigger value="json">JSON</TabsTrigger>
+                                </TabsList>
+                                <TabsContent value="table" className="mt-2">
+                                  {!r ? (
+                                    <p className="text-xs text-muted-foreground">Run the test set to see the extraction.</p>
+                                  ) : !r.facts?.length ? (
+                                    <p className="text-xs text-muted-foreground">No facts extracted.</p>
+                                  ) : (
+                                    factsTable(
+                                      r.facts.map((f) => f.data),
+                                      attrs,
+                                      r.facts.map((f) => f.snippet),
+                                    )
+                                  )}
+                                  {attrs.length === 0 && (
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                      This version's schema defines no attributes — see the Extractors editor.
+                                    </p>
+                                  )}
+                                </TabsContent>
+                                <TabsContent value="json" className="mt-2">
+                                  <pre className="max-h-72 overflow-auto rounded-md bg-background p-2 font-mono text-xs">
+                                    {JSON.stringify(r?.facts?.map((f) => f.data) ?? [], null, 2)}
+                                  </pre>
+                                </TabsContent>
+                              </Tabs>
                             </TabsContent>
 
                             <TabsContent value="expected" className="mt-3">
-                              {expectedEditor}
+                              <Tabs defaultValue="json">
+                                <TabsList variant="line">
+                                  <TabsTrigger value="json">JSON</TabsTrigger>
+                                  <TabsTrigger value="table">Table</TabsTrigger>
+                                </TabsList>
+                                <TabsContent value="json" className="mt-2">
+                                  {expectedEditor}
+                                </TabsContent>
+                                <TabsContent value="table" className="mt-2">
+                                  {(() => {
+                                    const rows = (s.expected_payload as Record<string, unknown>[] | null) ?? [];
+                                    return rows.length ? (
+                                      factsTable(rows, attrs)
+                                    ) : (
+                                      <p className="text-xs text-muted-foreground">
+                                        No expected facts yet — add them in the JSON tab or “Set from run”.
+                                      </p>
+                                    );
+                                  })()}
+                                </TabsContent>
+                              </Tabs>
                             </TabsContent>
                           </Tabs>
                         )}
