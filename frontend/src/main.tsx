@@ -6,6 +6,7 @@ import { ThemeProvider } from "next-themes";
 
 import App from "./App";
 import { Toaster } from "./components/ui/sonner";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { queryClient } from "./lib/queryClient";
 
 import "./index.css";
@@ -14,10 +15,12 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <App />
-          <Toaster richColors position="top-right" />
-        </BrowserRouter>
+        <TooltipProvider delay={300}>
+          <BrowserRouter>
+            <App />
+            <Toaster richColors position="top-right" />
+          </BrowserRouter>
+        </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>
   </React.StrictMode>,

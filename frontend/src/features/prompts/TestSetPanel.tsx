@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { type ComponentProps, Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ChevronRight, FlaskConical, Loader2, Plus, Save, Trash2 } from "lucide-react";
 
@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Toggle } from "@/components/ui/toggle";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDocuments } from "@/features/documents/api";
 import { cn } from "@/lib/utils";
 import {
@@ -43,37 +45,48 @@ function cell(v: unknown) {
 function factsTable(rows: Record<string, unknown>[], attrs: string[], sources?: (string | undefined)[]) {
   return (
     <div className="max-h-72 overflow-auto rounded-md border bg-background">
-      <table className="w-full text-xs">
-        <thead className="sticky top-0 bg-muted">
-          <tr className="border-b">
-            <th className="px-2 py-1 text-left font-medium text-muted-foreground">#</th>
+      <Table className="text-xs">
+        <TableHeader className="sticky top-0 z-10 bg-muted">
+          <TableRow>
+            <TableHead className="h-8 w-8 text-muted-foreground">#</TableHead>
             {attrs.map((a) => (
-              <th key={a} className="px-2 py-1 text-left font-medium">
+              <TableHead key={a} className="h-8">
                 {a}
-              </th>
+              </TableHead>
             ))}
-            {sources && <th className="px-2 py-1 text-left font-medium text-muted-foreground">source</th>}
-          </tr>
-        </thead>
-        <tbody>
+            {sources && <TableHead className="h-8 text-muted-foreground">source</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {rows.map((data, i) => (
-            <tr key={i} className="border-b align-top last:border-0">
-              <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
+            <TableRow key={i} className="align-top">
+              <TableCell className="py-1 text-muted-foreground">{i + 1}</TableCell>
               {attrs.map((a) => (
-                <td key={a} className="px-2 py-1">
+                <TableCell key={a} className="py-1">
                   {cell(data[a])}
-                </td>
+                </TableCell>
               ))}
               {sources && (
-                <td className="max-w-[16rem] truncate px-2 py-1 text-muted-foreground" title={sources[i]}>
+                <TableCell className="max-w-[16rem] truncate py-1 text-muted-foreground" title={sources[i]}>
                   {sources[i] ? `“${sources[i]}”` : "—"}
-                </td>
+                </TableCell>
               )}
-            </tr>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
+  );
+}
+
+/** A Button with a hover tooltip that explains the action in a bit more detail
+ * than the label alone. Merges the tooltip trigger onto the Button (no extra DOM). */
+function TipButton({ tip, ...props }: { tip: string } & ComponentProps<typeof Button>) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button {...props} />} />
+      <TooltipContent>{tip}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -242,10 +255,15 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle>Test set{samples.data ? ` (${samples.data.length})` : ""}</CardTitle>
-        <Button size="sm" onClick={() => extract()} disabled={!version || !samples.data?.length || dryRun.isPending}>
+        <TipButton
+          tip="Run the extractor over every document in the test set and save each result"
+          size="sm"
+          onClick={() => extract()}
+          disabled={!version || !samples.data?.length || dryRun.isPending}
+        >
           {dryRun.isPending ? <Loader2 className="animate-spin" /> : <FlaskConical />}
           {dryRun.isPending ? "Extracting…" : "Extract"}
-        </Button>
+        </TipButton>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -267,10 +285,16 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
             onChange={(e) => setLabel(e.target.value)}
             placeholder="label (optional)"
           />
-          <Button size="sm" variant="outline" onClick={addSample} disabled={!docId || sactions.create.isPending}>
+          <TipButton
+            tip="Add the selected document to this test set as a sample"
+            size="sm"
+            variant="outline"
+            onClick={addSample}
+            disabled={!docId || sactions.create.isPending}
+          >
             <Plus />
             Add
-          </Button>
+          </TipButton>
         </div>
 
         <Table>
@@ -292,9 +316,14 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <span className="text-xs font-medium">Expected — JSON</span>
                     {!isClassifier && (
-                      <Button variant="outline" size="sm" onClick={() => setExpectedFromExtracted(s)}>
+                      <TipButton
+                        tip="Copy the extracted facts into Expected as the baseline to compare against"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setExpectedFromExtracted(s)}
+                      >
                         Set from extraction
-                      </Button>
+                      </TipButton>
                     )}
                   </div>
                   <Textarea
@@ -303,10 +332,15 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                     onChange={(e) => setExpectedText(e.target.value)}
                     placeholder={isClassifier ? '["lab_report"]' : '[{ "test_name": "…" }]'}
                   />
-                  <Button size="sm" className="mt-1" onClick={() => saveExpected(s)}>
+                  <TipButton
+                    tip="Save this Expected value as the document's gold to compare future extractions against"
+                    size="sm"
+                    className="mt-1"
+                    onClick={() => saveExpected(s)}
+                  >
                     <Save />
                     Save
-                  </Button>
+                  </TipButton>
                 </div>
               );
 
@@ -333,18 +367,23 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                           {types.map((t) => {
                             const on = ((s.expected_payload as string[] | null) ?? []).includes(t);
                             return (
-                              <button
-                                key={t}
-                                onClick={() => toggleType(s, t)}
-                                className={cn(
-                                  "rounded border px-1.5 py-0.5 text-xs transition-colors",
-                                  on
-                                    ? "border-primary bg-primary/10 font-medium"
-                                    : "border-input text-muted-foreground hover:bg-muted",
-                                )}
-                              >
-                                {t}
-                              </button>
+                              <Tooltip key={t}>
+                                <TooltipTrigger
+                                  render={
+                                    <Toggle
+                                      size="sm"
+                                      pressed={on}
+                                      onPressedChange={() => toggleType(s, t)}
+                                      className="h-6 border border-input px-1.5 text-xs data-[state=on]:border-primary data-[state=on]:bg-primary/10"
+                                    >
+                                      {t}
+                                    </Toggle>
+                                  }
+                                />
+                                <TooltipContent>
+                                  {on ? `Remove “${t}” from the expected types` : `Mark “${t}” as an expected type for this document`}
+                                </TooltipContent>
+                              </Tooltip>
                             );
                           })}
                           {types.length === 0 && (
@@ -379,18 +418,19 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
-                        <Button
+                        <TipButton
+                          tip="Run the extractor on just this document and save its result"
                           variant="ghost"
                           size="icon"
                           className="size-8"
                           aria-label="Extract this document"
-                          title="Extract this document"
                           disabled={!version || dryRun.isPending}
                           onClick={() => extract([s.id])}
                         >
                           <FlaskConical />
-                        </Button>
-                        <Button
+                        </TipButton>
+                        <TipButton
+                          tip="Remove this document from the test set (does not delete the document)"
                           variant="ghost"
                           size="icon"
                           className="size-8"
@@ -398,7 +438,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                           onClick={() => sactions.remove.mutate(s.id)}
                         >
                           <Trash2 className="text-destructive" />
-                        </Button>
+                        </TipButton>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -486,22 +526,22 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                     </p>
                                   ) : (
                                     <div className="overflow-auto rounded-md border bg-background">
-                                      <table className="w-full text-xs">
-                                        <thead className="bg-muted">
-                                          <tr className="border-b">
+                                      <Table className="text-xs">
+                                        <TableHeader className="bg-muted">
+                                          <TableRow>
                                             {attrs.map((a) => (
-                                              <th key={a} className="px-2 py-1 text-left font-medium">
+                                              <TableHead key={a} className="h-8">
                                                 {a}
-                                              </th>
+                                              </TableHead>
                                             ))}
-                                            <th className="w-8" />
-                                          </tr>
-                                        </thead>
-                                        <tbody>
+                                            <TableHead className="h-8 w-8" />
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
                                           {expectedRows.map((row, ri) => (
-                                            <tr key={ri} className="border-b last:border-0">
+                                            <TableRow key={ri}>
                                               {attrs.map((a) => (
-                                                <td key={a} className="px-1 py-0.5">
+                                                <TableCell key={a} className="p-1">
                                                   <Input
                                                     className="h-7"
                                                     value={
@@ -513,10 +553,11 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                                     }
                                                     onChange={(e) => setExpectedCell(ri, a, e.target.value)}
                                                   />
-                                                </td>
+                                                </TableCell>
                                               ))}
-                                              <td className="px-1">
-                                                <Button
+                                              <TableCell className="p-1">
+                                                <TipButton
+                                                  tip="Remove this expected fact row"
                                                   variant="ghost"
                                                   size="icon"
                                                   className="size-7"
@@ -524,33 +565,50 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                                   onClick={() => removeExpectedRow(ri)}
                                                 >
                                                   <Trash2 className="size-3.5 text-destructive" />
-                                                </Button>
-                                              </td>
-                                            </tr>
+                                                </TipButton>
+                                              </TableCell>
+                                            </TableRow>
                                           ))}
                                           {expectedRows.length === 0 && (
-                                            <tr>
-                                              <td colSpan={attrs.length + 1} className="px-2 py-3 text-center text-muted-foreground">
+                                            <TableRow>
+                                              <TableCell
+                                                colSpan={attrs.length + 1}
+                                                className="py-3 text-center text-muted-foreground"
+                                              >
                                                 No expected facts yet.
-                                              </td>
-                                            </tr>
+                                              </TableCell>
+                                            </TableRow>
                                           )}
-                                        </tbody>
-                                      </table>
+                                        </TableBody>
+                                      </Table>
                                     </div>
                                   )}
                                   <div className="flex flex-wrap gap-2">
-                                    <Button variant="outline" size="sm" onClick={addExpectedRow}>
+                                    <TipButton
+                                      tip="Add an empty expected fact row to fill in"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={addExpectedRow}
+                                    >
                                       <Plus />
                                       Row
-                                    </Button>
-                                    <Button variant="outline" size="sm" onClick={() => setExpectedFromExtracted(s)}>
+                                    </TipButton>
+                                    <TipButton
+                                      tip="Copy the extracted facts into Expected as the baseline to compare against"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => setExpectedFromExtracted(s)}
+                                    >
                                       Set from extraction
-                                    </Button>
-                                    <Button size="sm" onClick={() => saveExpected(s)}>
+                                    </TipButton>
+                                    <TipButton
+                                      tip="Save these expected facts as the document's gold"
+                                      size="sm"
+                                      onClick={() => saveExpected(s)}
+                                    >
                                       <Save />
                                       Save
-                                    </Button>
+                                    </TipButton>
                                   </div>
                                 </TabsContent>
 
