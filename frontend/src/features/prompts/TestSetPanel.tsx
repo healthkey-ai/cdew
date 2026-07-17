@@ -72,16 +72,20 @@ function useColWidths(key: number | string) {
 }
 type ColWidths = ReturnType<typeof useColWidths>;
 
-/** Drag handle on a resizable column's right edge. Requires a `relative` header cell. */
+/** Drag handle on a resizable column's right edge — always visible (a thin grip
+ * that thickens/points on hover). Requires a `relative` header cell. */
 function ColHandle({ col, cols }: { col: string; cols: ColWidths }) {
   return (
     <span
       role="separator"
       aria-orientation="vertical"
+      title="Drag to resize column"
       onMouseDown={(e) => cols.startResize(col, e)}
       onClick={(e) => e.stopPropagation()}
-      className="absolute top-0 right-0 z-20 h-full w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/50"
-    />
+      className="group/handle absolute top-0 right-0 z-20 flex h-full w-3 cursor-col-resize touch-none items-center justify-center select-none"
+    >
+      <span className="h-4 w-0.5 rounded bg-border transition-all group-hover/handle:h-full group-hover/handle:w-1 group-hover/handle:bg-primary" />
+    </span>
   );
 }
 
