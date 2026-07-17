@@ -22,8 +22,8 @@ import {
 } from "./api";
 
 /** Labeled test set for a classifier or extractor (design §8.3): add documents,
- * label the expected gold, dry-run the selected version, and expand a sample to
- * inspect the extracted results and edit its gold. */
+ * label the expected value, dry-run the selected version, and expand a sample to
+ * inspect the extracted results and edit its expected value. */
 export function TestSetPanel({ def, version }: { def: PromptDefinition; version: PromptVersion | null }) {
   const samples = useTestSamples(def.id);
   const sactions = useTestSampleActions(def.id);
@@ -34,7 +34,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
   const [docId, setDocId] = useState("");
   const [label, setLabel] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [goldText, setGoldText] = useState("");
+  const [expectedText, setExpectedText] = useState("");
 
   const isClassifier = def.kind === "classifier";
   const types = useMemo(
@@ -72,7 +72,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
           const pass = scored.filter((r) => r.passed).length;
           toast[pass === scored.length ? "success" : "info"](`${pass}/${scored.length} passed`);
         } else {
-          toast.info("Ran — expand a row to see results, then set gold");
+          toast.info("Ran — expand a row to see results, then set the expected value");
         }
       },
       onError: (err) => {
@@ -88,7 +88,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       return;
     }
     setExpandedId(s.id);
-    setGoldText(s.expected_payload != null ? JSON.stringify(s.expected_payload, null, 2) : "");
+    setExpectedText(s.expected_payload != null ? JSON.stringify(s.expected_payload, null, 2) : "");
   };
 
   const toggleType = (s: TestSample, type: string) => {
@@ -104,29 +104,29 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       toast.error("Run the test set first");
       return;
     }
-    const gold = row.facts.map((f) => f.data);
+    const expected = row.facts.map((f) => f.data);
     sactions.update.mutate(
-      { id: s.id, expected_payload: gold },
+      { id: s.id, expected_payload: expected },
       {
         onSuccess: () => {
-          toast.success("Gold set from current output");
-          if (expandedId === s.id) setGoldText(JSON.stringify(gold, null, 2));
+          toast.success("Expected set from current output");
+          if (expandedId === s.id) setExpectedText(JSON.stringify(expected, null, 2));
         },
       },
     );
   };
 
-  const saveGold = (s: TestSample) => {
+  const saveExpected = (s: TestSample) => {
     let payload: unknown = null;
-    if (goldText.trim()) {
+    if (expectedText.trim()) {
       try {
-        payload = JSON.parse(goldText);
+        payload = JSON.parse(expectedText);
       } catch {
         toast.error("Invalid JSON");
         return;
       }
     }
-    sactions.update.mutate({ id: s.id, expected_payload: payload }, { onSuccess: () => toast.success("Gold saved") });
+    sactions.update.mutate({ id: s.id, expected_payload: payload }, { onSuccess: () => toast.success("Expected saved") });
   };
 
   const passBadge = (r?: DryRunRow) =>
@@ -175,7 +175,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
           <TableHeader>
             <TableRow>
               <TableHead>Document</TableHead>
-              <TableHead>Expected (gold)</TableHead>
+              <TableHead>Expected</TableHead>
               <TableHead>Result</TableHead>
               <TableHead className="w-10" />
             </TableRow>
@@ -228,8 +228,8 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                       ) : (
                         <div className="text-xs text-muted-foreground">
                           {(s.expected_payload as unknown[] | null)?.length
-                            ? `${(s.expected_payload as unknown[]).length} gold fact(s)`
-                            : "no gold"}
+                            ? `${(s.expected_payload as unknown[]).length} expected fact(s)`
+                            : "not set"}
                         </div>
                       )}
                     </TableCell>
@@ -312,10 +312,10 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                             )}
                           </div>
 
-                          {/* gold editor */}
+                          {/* expected editor */}
                           <div>
                             <div className="mb-1 flex items-center justify-between gap-2">
-                              <span className="text-xs font-medium">Expected (gold) — JSON</span>
+                              <span className="text-xs font-medium">Expected — JSON</span>
                               {!isClassifier && (
                                 <Button variant="outline" size="sm" onClick={() => setExpectedFromRun(s)}>
                                   Set from run
@@ -324,13 +324,13 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                             </div>
                             <Textarea
                               className="h-64 font-mono text-xs"
-                              value={goldText}
-                              onChange={(e) => setGoldText(e.target.value)}
+                              value={expectedText}
+                              onChange={(e) => setExpectedText(e.target.value)}
                               placeholder={isClassifier ? '["lab_report"]' : '[{ "test_name": "…" }]'}
                             />
-                            <Button size="sm" className="mt-1" onClick={() => saveGold(s)}>
+                            <Button size="sm" className="mt-1" onClick={() => saveExpected(s)}>
                               <Save />
-                              Save gold
+                              Save
                             </Button>
                           </div>
                         </div>
@@ -352,8 +352,8 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
 
         <p className="text-xs text-muted-foreground">
           {isClassifier
-            ? "Gold = the types this document should route to. Run, then expand a row to inspect scores and edit the gold."
-            : "Gold = the expected facts. Run to see the extraction, expand a row to inspect it, then “Set from run” / edit the JSON."}
+            ? "Expected = the types this document should route to. Run, then expand a row to inspect scores and edit it."
+            : "Expected = the facts this document should yield. Run to see the extraction, expand a row to inspect it, then “Set from run” / edit the JSON."}
         </p>
       </CardContent>
     </Card>
