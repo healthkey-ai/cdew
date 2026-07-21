@@ -12,7 +12,16 @@ from pathlib import Path
 
 from prefect import flow
 
-_BACKEND_DIR = Path(__file__).resolve().parents[2]  # .../backend (the Django project root)
+
+def _django_root() -> Path | None:
+    """Find the Django project root — the dir with ``manage.py`` + the ``apps/``
+    package — by walking up from this file and the cwd. Robust to how Prefect's
+    flow-from-storage loader sets ``__file__`` / cwd (which aren't the backend dir)."""
+    for start in (Path(__file__).resolve(), Path.cwd().resolve()):
+        for d in (start, *start.parents):
+            if (d / "manage.py").is_file() and (d / "apps" / "__init__.py").is_file():
+                return d
+    return None
 
 
 def _ensure_django() -> bool:
@@ -29,10 +38,14 @@ def _ensure_django() -> bool:
 
     import django
 
-    # Prefect loads the flow from storage ("...at '.'") without the Django project
-    # root on sys.path, so `apps.*` / `config.*` won't import during setup. Ensure it.
-    if str(_BACKEND_DIR) not in sys.path:
-        sys.path.insert(0, str(_BACKEND_DIR))
+    root = _django_root()
+    if root:
+        # Prefect puts the flow file's own dir (…/apps/pipeline, which contains an
+        # `apps.py` AppConfig) on sys.path[0] — that shadows the top-level `apps`
+        # *package* as a module ("'apps' is not a package"). Force the Django project
+        # root to the very front (dedup) so `apps` / `config` resolve to the packages.
+        rs = str(root)
+        sys.path[:] = [rs] + [p for p in sys.path if p != rs]
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
     django.setup()
     return True
@@ -44,8 +57,11 @@ def extract_document(job_id: int):
     # Delegate to the plain orchestrator so job-state transitions live in one
     # place (service.execute_pipeline); inject the Prefect task runner so the LLM
     # steps run as retried, concurrency-capped tasks (#54).
-    from .service import execute_pipeline
-    from .tasks import PrefectRunner
+    # Absolute imports: Prefect loads this flow file under a non-canonical module
+    # name, so relative imports (`.service`) would build a duplicate module tree and
+    # re-register the models. `apps.pipeline.*` always resolves to the real package.
+    from apps.pipeline.service import execute_pipeline
+    from apps.pipeline.tasks import PrefectRunner
 
     try:
         execute_pipeline(job_id, runner=PrefectRunner())
@@ -58,8 +74,8 @@ def dry_run_flow(job_id: int):
     owns_django = _ensure_django()
     # Async Test Set dry-run (#55): fan out one gemini task per sample; job-state
     # transitions stay in dryrun.execute_dry_run.
-    from .dryrun import execute_dry_run
-    from .tasks import DryRunPrefectRunner
+    from apps.pipeline.dryrun import execute_dry_run
+    from apps.pipeline.tasks import DryRunPrefectRunner
 
     try:
         execute_dry_run(job_id, runner=DryRunPrefectRunner())
