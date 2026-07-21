@@ -8,8 +8,11 @@ live in one place; per-task retries + the gemini concurrency limit arrive with t
 LLM tasks (#54).
 """
 import os
+from pathlib import Path
 
 from prefect import flow
+
+_BACKEND_DIR = Path(__file__).resolve().parents[2]  # .../backend (the Django project root)
 
 
 def _ensure_django() -> bool:
@@ -22,8 +25,14 @@ def _ensure_django() -> bool:
 
     if apps.ready:
         return False
+    import sys
+
     import django
 
+    # Prefect loads the flow from storage ("...at '.'") without the Django project
+    # root on sys.path, so `apps.*` / `config.*` won't import during setup. Ensure it.
+    if str(_BACKEND_DIR) not in sys.path:
+        sys.path.insert(0, str(_BACKEND_DIR))
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
     django.setup()
     return True
