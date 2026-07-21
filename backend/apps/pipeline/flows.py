@@ -83,6 +83,20 @@ def dry_run_flow(job_id: int):
         _close_django(owns_django)
 
 
+@flow(name="geometry")
+def geometry_flow(doc_id: int):
+    owns_django = _ensure_django()
+    # On-demand geometry for the review overlay (#67): Doc AI call as a task;
+    # DocumentGeometry state transitions stay in geometry.execute_geometry.
+    from apps.documents.geometry.service import execute_geometry
+    from apps.pipeline.tasks import GeometryPrefectRunner
+
+    try:
+        execute_geometry(doc_id, runner=GeometryPrefectRunner())
+    finally:
+        _close_django(owns_django)
+
+
 def _close_django(owns_django: bool) -> None:
     # Only in the Prefect execution subprocess we configured: close its Django DB
     # connection so it isn't reported leaked at interpreter shutdown. Skipped

@@ -95,3 +95,27 @@ class DryRunPrefectRunner:
     def run(self, version, samples) -> list[dict]:
         futures = [dry_run_one_task.submit(version.id, s.id) for s in samples]
         return [f.result() for f in futures]
+
+
+@task(name="docai-geometry", tags={"docai"}, retries=_RETRIES, retry_delay_seconds=_RETRY_DELAY)
+def docai_geometry_task(doc_id: int) -> dict:
+    from apps.documents.models import SourceDocument
+
+    from apps.documents.geometry.docai import _ocr_fn
+
+    try:
+        doc = SourceDocument.objects.get(id=doc_id)
+        with doc.file.open("rb") as f:
+            content = f.read()
+        return _ocr_fn()(content, doc.mime)
+    except Exception as exc:
+        logger.warning("task: docai geometry failed doc=%s err=%s", doc_id, type(exc).__name__)
+        raise RuntimeError("geometry_failed") from None
+
+
+class GeometryPrefectRunner:
+    """Geometry runner (#67): the Document AI call as a retried, `docai`-tagged
+    task. Injected by geometry_flow; never used on the ``local`` path."""
+
+    def ocr(self, doc) -> dict:
+        return docai_geometry_task(doc.id)

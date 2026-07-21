@@ -27,7 +27,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         from prefect import serve
 
-        from apps.pipeline.flows import dry_run_flow, extract_document
+        from apps.pipeline.flows import dry_run_flow, extract_document, geometry_flow
 
         # Prefect runs each flow in a subprocess that loads the flow "from storage"
         # without the Django project root importable — so `django.setup()` there
@@ -39,6 +39,7 @@ class Command(BaseCommand):
 
         extract_dep = _dep_name(getattr(settings, "PREFECT_DEPLOYMENT", "extract-document/default"))
         dryrun_dep = _dep_name(getattr(settings, "PREFECT_DRYRUN_DEPLOYMENT", "dry-run/default"))
+        geometry_dep = _dep_name(getattr(settings, "PREFECT_GEOMETRY_DEPLOYMENT", "geometry/default"))
 
         if not os.environ.get("PREFECT_API_URL"):
             self.stdout.write(
@@ -51,14 +52,16 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Serving '{extract_document.name}/{extract_dep}' + '{dry_run_flow.name}/{dryrun_dep}'. "
-                "Trigger via upload / test-set Extract while PREFECT_DISPATCH=deployment. Ctrl-C to stop."
+                f"Serving '{extract_document.name}/{extract_dep}' + '{dry_run_flow.name}/{dryrun_dep}' + "
+                f"'{geometry_flow.name}/{geometry_dep}'. "
+                "Trigger via upload / test-set Extract / review while PREFECT_DISPATCH=deployment. Ctrl-C to stop."
             )
         )
-        # Blocks: registers both deployments and polls for scheduled runs.
+        # Blocks: registers the deployments and polls for scheduled runs.
         serve(
             extract_document.to_deployment(name=extract_dep),
             dry_run_flow.to_deployment(name=dryrun_dep),
+            geometry_flow.to_deployment(name=geometry_dep),
         )
 
 
