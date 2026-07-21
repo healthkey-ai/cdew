@@ -43,3 +43,31 @@ class ExtractionJob(models.Model):
 
     def __str__(self):
         return f"job#{self.pk} doc={self.document_id} {self.status}/{self.stage}"
+
+
+class DryRunJob(models.Model):
+    """An async dry-run of a PromptVersion over its test set, or a subset (design
+    §8.3, #55). The per-sample results persist on ``PromptTestSample.extracted_payload``;
+    this only tracks progress + links the Prefect flow run. ``summary`` holds safe
+    counts for the UI toast (no PHI)."""
+
+    # String ref to avoid importing prompts here (pipeline.models stays prompts-free).
+    version = models.ForeignKey("prompts.PromptVersion", on_delete=models.CASCADE, related_name="dry_run_jobs")
+    sample_ids = models.JSONField(default=list)  # [] = the whole test set
+    status = models.CharField(max_length=16, choices=JobStatus.choices, default=JobStatus.QUEUED)
+    summary = models.JSONField(default=dict)  # {"total", "scored", "passed"} — safe counts only
+
+    prefect_flow_run_id = models.CharField(max_length=64, blank=True, default="")
+    errors = models.JSONField(default=list)  # [{"code": "..."}] — safe category codes only, never PHI
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "dry_run_job"
+        indexes = [models.Index(fields=["version", "-created_at"])]
+
+    def __str__(self):
+        return f"dryrun#{self.pk} v={self.version_id} {self.status}"

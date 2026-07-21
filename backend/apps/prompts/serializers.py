@@ -1,6 +1,21 @@
 from rest_framework import serializers
 
+from apps.pipeline.models import DryRunJob
+
 from .models import PromptDefinition, PromptTestSample, PromptVersion
+
+
+class DryRunJobSerializer(serializers.ModelSerializer):
+    """Async dry-run job status (#55). Per-sample results live on the samples;
+    this is progress + safe summary counts, for polling."""
+
+    class Meta:
+        model = DryRunJob
+        fields = (
+            "id", "version", "sample_ids", "status", "summary", "errors",
+            "created_at", "started_at", "finished_at",
+        )
+        read_only_fields = fields
 
 
 class PromptVersionSerializer(serializers.ModelSerializer):

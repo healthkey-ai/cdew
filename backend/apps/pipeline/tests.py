@@ -94,6 +94,19 @@ class LlmTaskTests(TestCase):
         assert n >= 1
         assert ExtractionRecord.objects.filter(document=doc, extractor_key="lab_report").count() == n
 
+    def test_dry_run_one_task_fn_persists_sample(self):
+        from apps.pipeline.tasks import dry_run_one_task
+        from apps.prompts.models import PromptDefinition, PromptTestSample
+
+        lab = PromptDefinition.objects.get(key="lab_report")
+        doc = _doc()
+        parse_document(doc)
+        sample = PromptTestSample.objects.create(definition=lab, document=doc)
+        row = dry_run_one_task.fn(lab.active_version_id, sample.id)
+        assert row["sample_id"] == sample.id and len(row["facts"]) >= 1
+        sample.refresh_from_db()
+        assert sample.extracted_payload is not None and sample.extracted_version_id == lab.active_version_id
+
 
 class PipelineServiceTests(TestCase):
     def test_upload_stops_at_needs_classification_by_default(self):

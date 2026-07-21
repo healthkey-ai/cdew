@@ -11,10 +11,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.accounts.permissions import IsPromptAuthor
+from apps.pipeline.models import DryRunJob
 
 from .lint.linter import lint_version
 from .models import PromptDefinition, PromptKind, PromptTestSample, PromptVersion
 from .serializers import (
+    DryRunJobSerializer,
     PromptDefinitionSerializer,
     PromptTestSampleSerializer,
     PromptVersionSerializer,
@@ -138,15 +140,17 @@ class PromptVersionViewSet(
 
     @action(detail=True, methods=["post"], url_path="dry-run")
     def dry_run(self, request, pk=None):
-        from apps.pipeline.dryrun import dry_run_version
+        """Submit an **async** dry-run of this version over its test set (or the
+        subset in `sample_ids`). Returns the DryRunJob (poll `dry-run-jobs/{id}/`);
+        per-sample results persist on the samples' `extracted_payload` (#55)."""
+        from apps.pipeline.dispatch import dispatch_dry_run
 
         version = self.get_object()
-        # Only this definition's samples; optionally a selected subset.
-        samples = PromptTestSample.objects.select_related("document").filter(definition=version.definition_id)
-        ids = request.data.get("sample_ids")
-        if ids:
-            samples = samples.filter(id__in=ids)
-        return Response({"results": dry_run_version(version, samples)})
+        ids = request.data.get("sample_ids") or []
+        job = DryRunJob.objects.create(version=version, sample_ids=list(ids))
+        dispatch_dry_run(job.id)  # local runs it inline; deployment/thread return immediately
+        job.refresh_from_db()
+        return Response(DryRunJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
 class PromptTestSampleViewSet(viewsets.ModelViewSet):
@@ -172,3 +176,11 @@ class PromptTestSampleViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         serializer.save(created_by=user if user.is_authenticated else None)
+
+
+class DryRunJobViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    """Poll an async dry-run submitted via versions/{id}/dry-run/ (#55)."""
+
+    queryset = DryRunJob.objects.all()
+    serializer_class = DryRunJobSerializer
+    permission_classes = [IsPromptAuthor]

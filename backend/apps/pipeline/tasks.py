@@ -57,6 +57,21 @@ def extract_one_task(doc_id: int, definition_id: int) -> int:
         raise RuntimeError("extract_failed") from None
 
 
+@task(name="dry-run-sample", tags={GEMINI_TAG}, retries=_RETRIES, retry_delay_seconds=_RETRY_DELAY)
+def dry_run_one_task(version_id: int, sample_id: int) -> dict:
+    from apps.prompts.models import PromptTestSample, PromptVersion
+
+    from .dryrun import dry_run_sample
+
+    try:
+        version = PromptVersion.objects.select_related("definition").get(id=version_id)
+        sample = PromptTestSample.objects.select_related("document").get(id=sample_id)
+        return dry_run_sample(version, sample)
+    except Exception as exc:
+        logger.warning("task: dry-run failed sample=%s err=%s", sample_id, type(exc).__name__)
+        raise RuntimeError("dry_run_failed") from None
+
+
 class PrefectRunner:
     """Step runner that executes each LLM step as a Prefect task — retries + the
     ``gemini`` concurrency limit. Injected by the flow; never used on the ``local``
@@ -71,3 +86,12 @@ class PrefectRunner:
         definitions = [d for d in resolve_extractors(routed_types) if d.active_version_id]
         futures = [extract_one_task.submit(doc.id, d.id) for d in definitions]
         return sum(f.result() for f in futures)
+
+
+class DryRunPrefectRunner:
+    """Dry-run runner (#55): one gemini task per test sample, run concurrently
+    under the limit. Injected by dry_run_flow; never used on the ``local`` path."""
+
+    def run(self, version, samples) -> list[dict]:
+        futures = [dry_run_one_task.submit(version.id, s.id) for s in samples]
+        return [f.result() for f in futures]

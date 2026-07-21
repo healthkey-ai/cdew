@@ -41,12 +41,30 @@ def extract_document(job_id: int):
     try:
         execute_pipeline(job_id, runner=PrefectRunner())
     finally:
-        # Only in the Prefect execution subprocess we configured: close its Django
-        # DB connection so it isn't reported leaked at interpreter shutdown. Skipped
-        # in-process (tests / `local` / `thread`) — closing there would break the
-        # caller's connection/transaction. (The pydantic-ai event-loop/HTTP-transport
-        # ResourceWarnings are its own internals and remain.)
-        if owns_django:
-            from django.db import connections
+        _close_django(owns_django)
 
-            connections.close_all()
+
+@flow(name="dry-run")
+def dry_run_flow(job_id: int):
+    owns_django = _ensure_django()
+    # Async Test Set dry-run (#55): fan out one gemini task per sample; job-state
+    # transitions stay in dryrun.execute_dry_run.
+    from .dryrun import execute_dry_run
+    from .tasks import DryRunPrefectRunner
+
+    try:
+        execute_dry_run(job_id, runner=DryRunPrefectRunner())
+    finally:
+        _close_django(owns_django)
+
+
+def _close_django(owns_django: bool) -> None:
+    # Only in the Prefect execution subprocess we configured: close its Django DB
+    # connection so it isn't reported leaked at interpreter shutdown. Skipped
+    # in-process (tests / `local` / `thread`) — closing there would break the
+    # caller's connection/transaction. (The pydantic-ai event-loop/HTTP-transport
+    # ResourceWarnings are its own internals and remain.)
+    if owns_django:
+        from django.db import connections
+
+        connections.close_all()

@@ -19,7 +19,7 @@ import {
   type PromptDefinition,
   type PromptVersion,
   type TestSample,
-  usePromptActions,
+  useDryRunJobs,
   useTestSampleActions,
   useTestSamples,
 } from "./api";
@@ -339,8 +339,26 @@ function TipButton({ tip, ...props }: { tip: string } & ComponentProps<typeof Bu
 export function TestSetPanel({ def, version }: { def: PromptDefinition; version: PromptVersion | null }) {
   const samples = useTestSamples(def.id);
   const sactions = useTestSampleActions(def.id);
-  const dryRun = usePromptActions(def.id).dryRun;
   const docs = useDocuments();
+  // Async dry-run/extract (#55): submit jobs to Prefect and poll; concurrent
+  // per-row jobs supported. `local` dispatch runs inline (job comes back done).
+  const dryRun = useDryRunJobs(
+    def.id,
+    (job) => {
+      if (job.status === "failed") {
+        toast.error("Extract failed — check the worker/LLM config.");
+        return;
+      }
+      const { scored = 0, passed = 0, total = 0 } = job.summary;
+      toast[scored && passed < scored ? "info" : "success"](
+        scored ? `${passed}/${scored} passed` : `Extracted ${total} document${total === 1 ? "" : "s"}`,
+      );
+    },
+    (err) => {
+      const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? "Couldn't start the extraction — is the Prefect worker running?");
+    },
+  );
   // Session-persisted column widths shared across the result tables (resizable).
   const cols = useColWidths(def.id);
 
@@ -406,24 +424,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
 
   const extract = (sampleIds?: number[]) => {
     if (!version) return;
-    dryRun.mutate(
-      { id: version.id, sampleIds },
-      {
-        onSuccess: (d) => {
-          const scored = d.results.filter((r) => r.passed !== undefined);
-          if (scored.length) {
-            const pass = scored.filter((r) => r.passed).length;
-            toast[pass === scored.length ? "success" : "info"](`${pass}/${scored.length} passed`);
-          } else {
-            toast.success(sampleIds ? "Extracted" : "Extracted all");
-          }
-        },
-        onError: (err) => {
-          const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-          toast.error(detail ?? "Extract failed — is the LLM configured for this environment?");
-        },
-      },
-    );
+    dryRun.submit(version.id, sampleIds);
   };
 
   const toggle = (s: TestSample) => {
@@ -530,10 +531,10 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
           tip="Run the extractor over every document in the test set and save each result"
           size="sm"
           onClick={() => extract()}
-          disabled={!version || !samples.data?.length || dryRun.isPending}
+          disabled={!version || !samples.data?.length || dryRun.wholeSetRunning}
         >
-          {dryRun.isPending ? <Loader2 className="animate-spin" /> : <FlaskConical />}
-          {dryRun.isPending ? "Extracting…" : "Extract"}
+          {dryRun.wholeSetRunning ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+          {dryRun.wholeSetRunning ? "Extracting…" : "Extract"}
         </TipButton>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -701,10 +702,10 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                           size="icon"
                           className="size-8"
                           aria-label="Extract this document"
-                          disabled={!version || dryRun.isPending}
+                          disabled={!version || dryRun.isSampleRunning(s.id)}
                           onClick={() => extract([s.id])}
                         >
-                          <FlaskConical />
+                          {dryRun.isSampleRunning(s.id) ? <Loader2 className="animate-spin" /> : <FlaskConical />}
                         </TipButton>
                         <TipButton
                           tip="Remove this document from the test set (does not delete the document)"

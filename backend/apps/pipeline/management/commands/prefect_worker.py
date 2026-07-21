@@ -22,21 +22,15 @@ from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
-    help = "Serve the extract-document Prefect deployment locally (executes runs triggered by the API)."
+    help = "Serve the extract-document + dry-run Prefect deployments locally (executes runs the API triggers)."
 
     def handle(self, *args, **options):
-        from apps.pipeline.flows import extract_document
+        from prefect import serve
 
-        deployment = getattr(settings, "PREFECT_DEPLOYMENT", "extract-document/default")
-        flow_name, _, dep_name = deployment.partition("/")
-        dep_name = dep_name or "default"
-        if flow_name and flow_name != extract_document.name:
-            self.stderr.write(
-                self.style.WARNING(
-                    f"PREFECT_DEPLOYMENT flow '{flow_name}' != flow '{extract_document.name}' — "
-                    "run_deployment will not find this deployment."
-                )
-            )
+        from apps.pipeline.flows import dry_run_flow, extract_document
+
+        extract_dep = _dep_name(getattr(settings, "PREFECT_DEPLOYMENT", "extract-document/default"))
+        dryrun_dep = _dep_name(getattr(settings, "PREFECT_DRYRUN_DEPLOYMENT", "dry-run/default"))
 
         if not os.environ.get("PREFECT_API_URL"):
             self.stdout.write(
@@ -49,9 +43,17 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Serving deployment '{extract_document.name}/{dep_name}'. "
-                "Trigger it with an upload while PREFECT_DISPATCH=deployment. Ctrl-C to stop."
+                f"Serving '{extract_document.name}/{extract_dep}' + '{dry_run_flow.name}/{dryrun_dep}'. "
+                "Trigger via upload / test-set Extract while PREFECT_DISPATCH=deployment. Ctrl-C to stop."
             )
         )
-        # Blocks: registers the deployment and polls for scheduled runs.
-        extract_document.serve(name=dep_name)
+        # Blocks: registers both deployments and polls for scheduled runs.
+        serve(
+            extract_document.to_deployment(name=extract_dep),
+            dry_run_flow.to_deployment(name=dryrun_dep),
+        )
+
+
+def _dep_name(deployment: str) -> str:
+    _, _, name = deployment.partition("/")
+    return name or "default"
