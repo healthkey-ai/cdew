@@ -9,7 +9,7 @@ all types of genomic and phenotype testing. See [`docs/design.md`](./docs/design
 ## Layout
 
 ```
-backend/     Django/DRF/Postgres API + Prefect worker (local: make prefect-serve)
+backend/     Django/DRF/Postgres API + Prefect worker (local: make prefect-worker)
   config/    settings split (base/development/production/test), urls, wsgi/asgi
   apps/
     core/        health probe
@@ -80,7 +80,7 @@ retries + the `gemini` concurrency limit), use three terminals:
 ```bash
 python manage.py runserver     # terminal 1 — API
 make prefect-server            # terminal 2 — Prefect API + UI  (http://localhost:4200)
-make prefect-serve             # terminal 3 — the flow worker (has Django/ORM)
+make prefect-worker            # terminal 3 — the flow worker (has Django/ORM)
 ```
 
 Then point the API at the server and switch dispatch, in `.env`:

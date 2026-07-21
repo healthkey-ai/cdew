@@ -9,7 +9,7 @@ configured, so flow tasks have ORM access.
 Local dev loop (three terminals):
 
     make prefect-server      # Prefect API + UI on http://localhost:4200
-    make prefect-serve       # this command (has Django/ORM)
+    make prefect-worker      # this command (has Django/ORM)
     python manage.py runserver
 
 Prefect is imported lazily here so the hermetic ``local`` dispatch/test path never

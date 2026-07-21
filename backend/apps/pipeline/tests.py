@@ -34,12 +34,12 @@ def _doc(content=b"Hemoglobin 9.1 g/dL low value here.", name="a.txt", ctype="te
     return doc
 
 
-class PrefectServeCommandTests(SimpleTestCase):
-    """Local Prefect serve command (#53). Hermetic — imports the flow but never
+class PrefectWorkerCommandTests(SimpleTestCase):
+    """Local Prefect worker command (#53). Hermetic — imports the flow but never
     starts a server (`.serve()` is not invoked)."""
 
     def test_command_is_registered(self):
-        assert get_commands().get("prefect_serve") == "apps.pipeline"
+        assert get_commands().get("prefect_worker") == "apps.pipeline"
 
     def test_deployment_setting_matches_flow(self):
         # run_deployment(PREFECT_DEPLOYMENT) must target the served flow's name.

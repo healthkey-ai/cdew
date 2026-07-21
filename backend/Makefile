@@ -1,4 +1,4 @@
-.PHONY: install migrate makemigrations run test lint fmt prefect-server prefect-serve prefect-concurrency
+.PHONY: install migrate makemigrations run test lint fmt prefect-server prefect-worker prefect-concurrency
 
 install:
 	pip install -r requirements.txt
@@ -27,8 +27,8 @@ fmt:
 prefect-server:
 	prefect server start
 
-prefect-serve:
-	python manage.py prefect_serve
+prefect-worker:
+	python manage.py prefect_worker
 
 # Create the `gemini` task concurrency limit (used once the LLM steps are tasks, #54).
 prefect-concurrency:
