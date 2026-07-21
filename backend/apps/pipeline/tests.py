@@ -63,6 +63,38 @@ class ExtractDocumentFlowTests(TestCase):
         assert job.status == JobStatus.COMPLETED
 
 
+class LlmTaskTests(TestCase):
+    """The Prefect LLM tasks (#54): bodies run via `.fn` (no Prefect engine),
+    plus their retry/concurrency wiring. The real submit/concurrency is exercised
+    against a running server (manual acceptance, like #53)."""
+
+    def test_tasks_are_retried_and_gemini_tagged(self):
+        from apps.pipeline.tasks import classify_task, extract_one_task
+
+        for t in (classify_task, extract_one_task):
+            assert "gemini" in t.tags  # capped by the gemini concurrency limit
+            assert t.retries == 2  # settings.PREFECT_TASK_RETRIES
+
+    def test_classify_task_fn_routes(self):
+        from apps.pipeline.tasks import classify_task
+
+        doc = _doc()
+        parse_document(doc)
+        assert classify_task.fn(doc.id) == ["lab_report"]
+
+    def test_extract_one_task_fn_creates_records(self):
+        from apps.documents.models import ExtractionRecord
+        from apps.pipeline.tasks import extract_one_task
+        from apps.prompts.models import PromptDefinition
+
+        doc = _doc()
+        parse_document(doc)
+        lab = PromptDefinition.objects.get(key="lab_report")
+        n = extract_one_task.fn(doc.id, lab.id)
+        assert n >= 1
+        assert ExtractionRecord.objects.filter(document=doc, extractor_key="lab_report").count() == n
+
+
 class PipelineServiceTests(TestCase):
     def test_upload_stops_at_needs_classification_by_default(self):
         # Default (PIPELINE_AUTO_CLASSIFY off): parse then wait in the human queue.

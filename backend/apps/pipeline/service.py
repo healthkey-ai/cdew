@@ -2,8 +2,10 @@
 transitions. The Prefect flow (flows.py) wraps this; the `local` dispatch backend
 calls it directly (so tests run without a Prefect runtime). Design §6.
 
-Phase 2 runs one real step (parse). Classify/extract steps are inserted here (and
-as Prefect tasks) in Phase 3/4.
+The LLM steps (classify, extract) run through an injected `runner`: `DirectRunner`
+inline by default (Prefect-free — tests + `local`), or a Prefect task runner under
+the flow for retries + the gemini concurrency limit (tasks.py, #54). Stage/status
+transitions stay here regardless.
 """
 import logging
 
@@ -18,7 +20,25 @@ from .models import ExtractionJob, JobStatus, Stage
 logger = logging.getLogger("apps.pipeline")
 
 
-def execute_pipeline(job_id: int) -> ExtractionJob:
+class DirectRunner:
+    """Default step runner: run the LLM steps inline, no Prefect (tests + `local`
+    dispatch — keeps that path Prefect-free). The Prefect flow injects a
+    task-based runner instead (tasks.py) for retries + the gemini concurrency
+    limit; either way the job-state transitions stay here in `execute_pipeline`."""
+
+    def classify(self, doc) -> list[str]:
+        from .classify import classify_document
+
+        return classify_document(doc).routed_types
+
+    def extract(self, doc, routed_types) -> int:
+        from .extract import extract_document
+
+        return extract_document(doc, routed_types)
+
+
+def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
+    runner = runner or DirectRunner()
     job = ExtractionJob.objects.select_related("document").get(id=job_id)
     doc = job.document
 
@@ -56,9 +76,7 @@ def execute_pipeline(job_id: int) -> ExtractionJob:
     job.progress = 0.6
     job.save(update_fields=["stage", "progress", "updated_at"])
     try:
-        from .classify import classify_document
-
-        classification = classify_document(doc)
+        routed_types = runner.classify(doc)
         doc.refresh_from_db()
     except Exception:
         logger.warning("pipeline: classify crashed job=%s", job.id)
@@ -71,9 +89,7 @@ def execute_pipeline(job_id: int) -> ExtractionJob:
         job.progress = 0.85
         job.save(update_fields=["stage", "progress", "updated_at"])
         try:
-            from .extract import extract_document
-
-            extract_document(doc, classification.routed_types)
+            runner.extract(doc, routed_types)
         except Exception:
             logger.warning("pipeline: extract crashed job=%s", job.id)
             return _finish(job, JobStatus.FAILED, errors=[{"code": "extract_error"}])

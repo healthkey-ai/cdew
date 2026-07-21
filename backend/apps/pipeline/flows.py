@@ -31,7 +31,9 @@ def _ensure_django() -> None:
 def extract_document(job_id: int):
     _ensure_django()
     # Delegate to the plain orchestrator so job-state transitions live in one
-    # place (service.execute_pipeline), whether run under Prefect or locally.
+    # place (service.execute_pipeline); inject the Prefect task runner so the LLM
+    # steps run as retried, concurrency-capped tasks (#54).
     from .service import execute_pipeline
+    from .tasks import PrefectRunner
 
-    execute_pipeline(job_id)
+    execute_pipeline(job_id, runner=PrefectRunner())
