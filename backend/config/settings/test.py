@@ -21,7 +21,8 @@ MEDIA_ROOT = tempfile.mkdtemp(prefix="cdew-test-media-")
 CLASSIFIER_SCORES_FN = "apps.prompts.testing.keyword_scores"
 EXTRACT_FACTS_FN = "apps.prompts.testing.canned_facts"
 
-# Pin the pipeline dispatch to synchronous in-process, regardless of a dev `.env`
-# (which may set PREFECT_DISPATCH=deployment for the local engine). Tests must run
-# the pipeline inline and hermetically — never hand off to a Prefect server.
+# Pin pipeline toggles regardless of a dev `.env` (which may flip these on for the
+# local engine) so tests are hermetic: dispatch inline, and don't auto-classify on
+# upload by default. Tests that need auto-classify use @override_settings.
 PREFECT_DISPATCH = "local"
+PIPELINE_AUTO_CLASSIFY = False

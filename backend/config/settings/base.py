@@ -231,6 +231,9 @@ PREFECT_DISPATCH = env("PREFECT_DISPATCH", default="local")
 PREFECT_DEPLOYMENT = env("PREFECT_DEPLOYMENT", default="extract-document/default")
 # PREFECT_API_URL is read by Prefect itself from the environment (self-hosted on GCP
 # for staging/prod; unset → ephemeral local for `thread` dev runs).
+# Per-task retry policy for the LLM tasks (apps.pipeline.tasks, #54).
+PREFECT_TASK_RETRIES = env.int("PREFECT_TASK_RETRIES", default=2)
+PREFECT_TASK_RETRY_DELAY_SECONDS = env.int("PREFECT_TASK_RETRY_DELAY_SECONDS", default=10)
 
 # ── Auto-classify on upload (design §3) ─────────────────────────────────────
 # Default OFF: an uploaded document is parsed and then waits in the
