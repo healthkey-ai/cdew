@@ -97,6 +97,21 @@ goes queued → completed. `make prefect-concurrency` creates the `gemini` task 
 Zero-infra alternative: `PREFECT_DISPATCH=thread` runs the flow in a background thread via Prefect's
 ephemeral API (no server/UI). Tests always use `local`.
 
+**Server database.** The Prefect server defaults to SQLite (`~/.prefect`) — fine for the default
+parse-only pipeline. Once you enable `PIPELINE_AUTO_CLASSIFY` (the classify/extract **task fan-out**),
+the concurrent writes make SQLite lock (`database is locked`); use **Postgres** instead (`asyncpg` is
+already a dependency):
+
+```bash
+make prefect-db            # createdb prefect  (once)
+make prefect-server-pg     # terminal 2 — server on Postgres (auto-migrates on start)
+```
+
+`PREFECT_DB_URL` defaults to the macOS socket DSN `postgresql+asyncpg:///prefect?host=/tmp`; override
+for Linux (`?host=/var/run/postgresql`) or TCP (`postgresql+asyncpg://user:pass@127.0.0.1:5432/prefect`).
+Equivalently, set it once globally: `prefect config set PREFECT_API_DATABASE_CONNECTION_URL=…`. This
+matches what staging/prod use (#8).
+
 ## Frontend — quickstart
 
 ```bash
