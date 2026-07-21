@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, FlaskConical, Lock, Pencil, Plus, Save, Send, Star, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Lock, Pencil, Plus, Save, Send, Star, Trash2, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -21,12 +21,10 @@ interface Props {
  * save / validate / dry-run / publish / activate + lint + dry-run output. */
 export function VersionToolbar({ def, versions, selVersion, onSelect, actions, onSave, canSave }: Props) {
   const [lint, setLint] = useState<LintResult | null>(null);
-  const [dryRows, setDryRows] = useState<unknown[] | null>(null);
 
   // Reset transient results when the selected version changes.
   useEffect(() => {
     setLint(null);
-    setDryRows(null);
   }, [selVersion?.id]);
 
   const isDraft = selVersion?.status === "draft";
@@ -131,19 +129,6 @@ export function VersionToolbar({ def, versions, selVersion, onSelect, actions, o
             <CheckCircle2 />
             Validate
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              actions.dryRun.mutate(
-                { id: selVersion.id },
-                { onSuccess: (d: { results: unknown[] }) => setDryRows(d.results) },
-              )
-            }
-          >
-            <FlaskConical />
-            Dry-run
-          </Button>
           {isDraft && (
             <Button
               size="sm"
@@ -208,13 +193,6 @@ export function VersionToolbar({ def, versions, selVersion, onSelect, actions, o
             </ul>
           )}
         </div>
-      )}
-
-      {/* dry-run output */}
-      {dryRows && (
-        <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs">
-          {JSON.stringify(dryRows, null, 2)}
-        </pre>
       )}
     </div>
   );

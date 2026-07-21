@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -83,13 +85,13 @@ class PromptAuthoringTests(APITestCase):
 
         draft = self._new_draft()
         r = self.client.post(f"/api/v1/prompts/versions/{draft['id']}/dry-run/")
-        assert r.status_code == 200, r.content
-        results = r.json()["results"]
-        assert len(results) == 1
-        assert results[0]["sample_id"] == sample.id
-        assert len(results[0]["facts"]) >= 1  # extracted via the double
-        assert results[0]["facts"][0]["resolved"] is True
-        assert ExtractionRecord.objects.count() == 0  # nothing persisted
+        assert r.status_code == 202, r.content
+        assert r.json()["status"] == "completed"  # `local` dispatch runs it inline
+        assert r.json()["summary"]["total"] == 1
+        sample.refresh_from_db()
+        facts = sample.extracted_payload  # results persist on the sample, not staged
+        assert facts and facts[0]["resolved"] is True
+        assert ExtractionRecord.objects.count() == 0  # nothing staged into promop
 
     def test_validate_is_advisory(self):
         draft = self._new_draft()
@@ -140,10 +142,16 @@ class PromptTestSetTests(APITestCase):
     def _sample(self, definition, **extra):
         return PromptTestSample.objects.create(definition=definition, document=self.doc, **extra)
 
-    def _dry_run(self, definition):
-        r = self.client.post(f"/api/v1/prompts/versions/{definition.active_version_id}/dry-run/")
-        assert r.status_code == 200, r.content
-        return r.json()["results"]
+    def _dry_run(self, definition, sample_ids=None):
+        """Submit a dry-run; `local` dispatch runs it inline so the returned job is
+        already completed. Returns the DryRunJob JSON (status + safe summary)."""
+        body = {"sample_ids": sample_ids} if sample_ids else {}
+        r = self.client.post(
+            f"/api/v1/prompts/versions/{definition.active_version_id}/dry-run/", body, format="json"
+        )
+        assert r.status_code == 202, r.content
+        assert r.json()["status"] == "completed"  # PREFECT_DISPATCH=local (pinned in test settings)
+        return r.json()
 
     def test_create_sample_requires_definition(self):
         r = self.client.post("/api/v1/prompts/test-set/", {"document": self.doc.id}, format="json")
@@ -160,34 +168,53 @@ class PromptTestSetTests(APITestCase):
     def test_dry_run_scoped_to_definition(self):
         # A classifier sample is not run when dry-running the lab extractor.
         self._sample(self.classifier, label="clf-only")
-        assert self._dry_run(self.lab) == []
+        assert self._dry_run(self.lab)["summary"]["total"] == 0
+
+    def test_dry_run_job_is_pollable(self):
+        self._sample(self.lab)
+        job = self._dry_run(self.lab)
+        r = self.client.get(f"/api/v1/prompts/dry-run-jobs/{job['id']}/")
+        assert r.status_code == 200
+        assert r.json()["status"] == "completed"
+        assert r.json()["summary"]["total"] == 1
+
+    def test_dry_run_dispatch_failure_marks_job_failed(self):
+        # e.g. deployment mode with no worker — clean failed job, not a 500 or orphan.
+        self._sample(self.lab)
+        with patch("apps.pipeline.dispatch.dispatch_dry_run", side_effect=RuntimeError("no worker")):
+            r = self.client.post(f"/api/v1/prompts/versions/{self.lab.active_version_id}/dry-run/")
+        assert r.status_code == 202, r.content
+        assert r.json()["status"] == "failed"
+        assert r.json()["errors"] == [{"code": "dispatch_failed"}]
 
     def test_extractor_pass_fail(self):
         s = self._sample(self.lab)
-        got = self._dry_run(self.lab)[0]["facts"]
-        gold = [f["data"] for f in got]
+        self._dry_run(self.lab)  # results persist on the sample
+        s.refresh_from_db()
+        gold = [f["data"] for f in s.extracted_payload]
 
         s.expected_payload = gold
         s.save()
-        assert self._dry_run(self.lab)[0]["passed"] is True
+        assert self._dry_run(self.lab)["summary"]["passed"] == 1
 
         s.expected_payload = [{"totally": "wrong"}]
         s.save()
-        assert self._dry_run(self.lab)[0]["passed"] is False
+        job = self._dry_run(self.lab)
+        assert job["summary"]["scored"] == 1 and job["summary"]["passed"] == 0
 
     def test_classifier_pass_fail(self):
         s = self._sample(self.classifier)
-        routed = self._dry_run(self.classifier)[0]["routed_types"]
+        self._dry_run(self.classifier)
+        s.refresh_from_db()
+        routed = s.extracted_payload["routed_types"]
 
         s.expected_payload = routed
         s.save()
-        assert self._dry_run(self.classifier)[0]["passed"] is True
+        assert self._dry_run(self.classifier)["summary"]["passed"] == 1
 
         s.expected_payload = [*routed, "bogus_type"]
         s.save()
-        row = self._dry_run(self.classifier)[0]
-        assert row["passed"] is False
-        assert "bogus_type" in row["missing"]
+        assert self._dry_run(self.classifier)["summary"]["passed"] == 0
 
     def test_extract_saves_extracted_payload(self):
         s = self._sample(self.lab)
@@ -200,26 +227,11 @@ class PromptTestSetTests(APITestCase):
     def test_extract_single_sample_by_id(self):
         a = self._sample(self.lab, label="a")
         b = self._sample(self.lab, label="b")
-        r = self.client.post(
-            f"/api/v1/prompts/versions/{self.lab.active_version_id}/dry-run/",
-            {"sample_ids": [a.id]},
-            format="json",
-        )
-        assert r.status_code == 200, r.content
-        assert [row["sample_id"] for row in r.json()["results"]] == [a.id]
+        assert self._dry_run(self.lab, sample_ids=[a.id])["summary"]["total"] == 1
         a.refresh_from_db()
         b.refresh_from_db()
         assert a.extracted_payload is not None
         assert b.extracted_payload is None  # not selected → not extracted
-
-    def _extract_one(self, sample):
-        r = self.client.post(
-            f"/api/v1/prompts/versions/{self.lab.active_version_id}/dry-run/",
-            {"sample_ids": [sample.id]},
-            format="json",
-        )
-        assert r.status_code == 200, r.content
-        return r.json()["results"][0]
 
     def test_extractor_pass_fail_is_order_insensitive(self):
         # A two-fact doc so ordering is meaningful.
@@ -228,15 +240,17 @@ class PromptTestSetTests(APITestCase):
         )
         parse_document(doc)
         s = PromptTestSample.objects.create(definition=self.lab, document=doc)
-        gold = [f["data"] for f in self._extract_one(s)["facts"]]
+        self._dry_run(self.lab, sample_ids=[s.id])
+        s.refresh_from_db()
+        gold = [f["data"] for f in s.extracted_payload]
         assert len(gold) == 2  # sanity: both labs extracted
 
         # Reversed gold → still a pass (facts are an unordered bag).
         s.expected_payload = list(reversed(gold))
         s.save()
-        assert self._extract_one(s)["passed"] is True
+        assert self._dry_run(self.lab, sample_ids=[s.id])["summary"]["passed"] == 1
 
         # A duplicated expected fact with no counterpart → fail (multiset, not set).
         s.expected_payload = [*gold, gold[0]]
         s.save()
-        assert self._extract_one(s)["passed"] is False
+        assert self._dry_run(self.lab, sample_ids=[s.id])["summary"]["passed"] == 0

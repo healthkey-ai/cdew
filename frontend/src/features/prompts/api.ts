@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
 
@@ -67,26 +68,24 @@ export interface DryRunFact {
   confidence: number | null;
 }
 
-/** One dry-run result row (keyed to a sample). Fields depend on the kind. */
-export interface DryRunRow {
-  sample_id: number;
-  label: string;
-  document_id: number;
-  passed?: boolean;
-  // extractor
-  facts?: DryRunFact[];
-  expected?: unknown;
-  // classifier
-  scores?: { type: string; confidence: number }[];
-  routed_types?: string[];
-  outcome?: string;
-  reason?: string | null;
-  expected_types?: string[];
-  missing?: string[];
-  extra?: string[];
+export type DryRunStatus = "queued" | "running" | "completed" | "failed";
+
+/** An async dry-run job (#55). Per-sample results persist on the samples; this is
+ * status + safe summary counts, polled to completion. */
+export interface DryRunJob {
+  id: number;
+  version: number;
+  sample_ids: number[]; // [] = whole set
+  status: DryRunStatus;
+  summary: { total?: number; scored?: number; passed?: number };
+  errors: { code: string }[];
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 const P = "/prompts";
+const isTerminal = (s: DryRunStatus) => s === "completed" || s === "failed";
 
 export function usePromptDefinitions() {
   return useQuery({
@@ -133,13 +132,6 @@ export function usePromptActions(defId: number | null) {
         (await api.post(`${P}/definitions/${defId}/activate/`, { version_id: versionId })).data,
       onSuccess: invalidate,
     }),
-    // "Extract": run the version over the definition's test set (or a subset),
-    // saving each sample's extracted_payload. Invalidates the test set to reload it.
-    dryRun: useMutation({
-      mutationFn: async ({ id, sampleIds }: { id: number; sampleIds?: number[] }) =>
-        (await api.post<{ results: DryRunRow[] }>(`${P}/versions/${id}/dry-run/`, sampleIds ? { sample_ids: sampleIds } : {})).data,
-      onSuccess: () => qc.invalidateQueries({ queryKey: ["prompts", "test-set", defId] }),
-    }),
     deleteVersion: useMutation({
       mutationFn: async (id: number) => {
         await api.delete(`${P}/versions/${id}/`);
@@ -181,5 +173,65 @@ export function useTestSampleActions(defId: number | null) {
       },
       onSuccess: invalidate,
     }),
+  };
+}
+
+/** Submit + poll async dry-run jobs (#55). Supports **concurrent** jobs: each
+ * submit (whole set or a single sample) is tracked and polled independently; on
+ * completion the test set is invalidated and `onDone(job)` fires (for a toast).
+ * `sampleIds` empty/undefined = the whole set. In `local` dispatch the job comes
+ * back already terminal, so no polling happens. */
+export function useDryRunJobs(
+  defId: number | null,
+  onDone?: (job: DryRunJob) => void,
+  onError?: (err: unknown) => void,
+) {
+  const qc = useQueryClient();
+  const [active, setActive] = useState<{ id: number; sampleIds: number[] }[]>([]);
+  const invalidateSet = () => qc.invalidateQueries({ queryKey: ["prompts", "test-set", defId] });
+
+  const submit = useMutation({
+    mutationFn: async ({ versionId, sampleIds }: { versionId: number; sampleIds?: number[] }) =>
+      (await api.post<DryRunJob>(`${P}/versions/${versionId}/dry-run/`, sampleIds ? { sample_ids: sampleIds } : {}))
+        .data,
+    onSuccess: (job) => {
+      if (isTerminal(job.status)) {
+        invalidateSet();
+        onDone?.(job);
+      } else {
+        setActive((a) => [...a, { id: job.id, sampleIds: job.sample_ids }]);
+      }
+    },
+    onError: (err) => onError?.(err),
+  });
+
+  const polled = useQueries({
+    queries: active.map((j) => ({
+      queryKey: ["dry-run-job", j.id],
+      queryFn: async () => (await api.get<DryRunJob>(`${P}/dry-run-jobs/${j.id}/`)).data,
+      refetchInterval: (q: { state: { data?: DryRunJob } }) =>
+        q.state.data && isTerminal(q.state.data.status) ? false : 1200,
+    })),
+  });
+
+  const doneKey = polled.map((r) => `${r.data?.id}:${r.data?.status}`).join();
+  useEffect(() => {
+    const done = polled.map((r) => r.data).filter((j): j is DryRunJob => !!j && isTerminal(j.status));
+    if (!done.length) return;
+    invalidateSet();
+    done.forEach((j) => onDone?.(j));
+    const ids = new Set(done.map((j) => j.id));
+    setActive((a) => a.filter((j) => !ids.has(j.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doneKey]);
+
+  const wholeSetRunning = active.some((j) => j.sampleIds.length === 0);
+  const runningSamples = new Set(active.flatMap((j) => j.sampleIds));
+
+  return {
+    submit: (versionId: number, sampleIds?: number[]) => submit.mutate({ versionId, sampleIds }),
+    isSampleRunning: (id: number) => wholeSetRunning || runningSamples.has(id),
+    wholeSetRunning: wholeSetRunning || submit.isPending,
+    anyRunning: active.length > 0 || submit.isPending,
   };
 }
