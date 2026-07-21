@@ -49,6 +49,20 @@ class PrefectServeCommandTests(SimpleTestCase):
         assert flow_name == extract_document.name == "extract-document"
 
 
+class ExtractDocumentFlowTests(TestCase):
+    """The Prefect flow body (#53): configures Django then delegates to the
+    orchestrator. Runs the underlying fn directly (no Prefect engine)."""
+
+    def test_flow_fn_configures_django_and_runs_pipeline(self):
+        from apps.pipeline.flows import _ensure_django, extract_document
+
+        _ensure_django()  # idempotent no-op when apps are already loaded
+        job = ExtractionJob.objects.create(document=_doc())
+        extract_document.fn(job.id)  # .fn = raw function, bypassing the Prefect engine
+        job.refresh_from_db()
+        assert job.status == JobStatus.COMPLETED
+
+
 class PipelineServiceTests(TestCase):
     def test_upload_stops_at_needs_classification_by_default(self):
         # Default (PIPELINE_AUTO_CLASSIFY off): parse then wait in the human queue.
