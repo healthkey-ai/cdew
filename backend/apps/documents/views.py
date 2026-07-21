@@ -1,3 +1,5 @@
+import logging
+
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -6,7 +8,7 @@ from rest_framework.response import Response
 
 from apps.accounts.permissions import IsReviewer
 from apps.pipeline.dispatch import dispatch_extract
-from apps.pipeline.models import ExtractionJob
+from apps.pipeline.models import ExtractionJob, JobStatus, Stage
 
 from .ingest import IngestError, ingest_upload
 from .models import DocumentText, ExtractionStatus, SourceDocument
@@ -15,6 +17,8 @@ from .serializers import (
     ExtractionRecordSerializer,
     SourceDocumentSerializer,
 )
+
+logger = logging.getLogger("apps.documents")
 
 
 class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
@@ -69,7 +73,20 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
 
         if created:
             job = ExtractionJob.objects.create(document=doc)
-            dispatch_extract(job.id)
+            try:
+                dispatch_extract(job.id)
+            except Exception:
+                # e.g. deployment mode with no worker/server — mark the job failed,
+                # don't 500 the upload or orphan a queued job. Safe code only, never PHI.
+                logger.warning("pipeline: dispatch failed job=%s", job.id)
+                job.status = JobStatus.FAILED
+                job.stage = Stage.DONE
+                job.progress = 1.0
+                job.errors = [{"code": "dispatch_failed"}]
+                job.finished_at = timezone.now()
+                job.save(
+                    update_fields=["status", "stage", "progress", "errors", "finished_at", "updated_at"]
+                )
             doc.refresh_from_db()
             job_id = job.id
         else:

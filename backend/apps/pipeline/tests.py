@@ -227,6 +227,16 @@ class JobApiTests(APITestCase):
         f = SimpleUploadedFile("labs.txt", b"Sodium 140 mmol/L within range.", content_type="text/plain")
         return self.client.post("/api/v1/documents/", {"file": f, "patient_ref": patient}, format="multipart")
 
+    def test_upload_dispatch_failure_marks_job_failed(self):
+        # e.g. deployment mode with no worker — upload still succeeds, job is failed.
+        with patch("apps.documents.views.dispatch_extract", side_effect=RuntimeError("no worker")):
+            r = self._upload()
+        assert r.status_code == 201, r.content
+        job = ExtractionJob.objects.get(id=r.json()["job_id"])
+        assert job.status == JobStatus.FAILED
+        assert job.stage == Stage.DONE
+        assert job.errors == [{"code": "dispatch_failed"}]
+
     def test_upload_creates_completed_job(self):
         r = self._upload()
         assert r.status_code == 201, r.content
