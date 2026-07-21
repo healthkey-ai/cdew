@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -175,6 +177,15 @@ class PromptTestSetTests(APITestCase):
         assert r.status_code == 200
         assert r.json()["status"] == "completed"
         assert r.json()["summary"]["total"] == 1
+
+    def test_dry_run_dispatch_failure_marks_job_failed(self):
+        # e.g. deployment mode with no worker — clean failed job, not a 500 or orphan.
+        self._sample(self.lab)
+        with patch("apps.pipeline.dispatch.dispatch_dry_run", side_effect=RuntimeError("no worker")):
+            r = self.client.post(f"/api/v1/prompts/versions/{self.lab.active_version_id}/dry-run/")
+        assert r.status_code == 202, r.content
+        assert r.json()["status"] == "failed"
+        assert r.json()["errors"] == [{"code": "dispatch_failed"}]
 
     def test_extractor_pass_fail(self):
         s = self._sample(self.lab)

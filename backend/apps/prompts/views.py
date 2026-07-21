@@ -4,6 +4,8 @@ Lifecycle: create/clone a draft → edit → validate (advisory) → publish (en
 shape-lint, sets active) → activate an older version (rollback). Dry-run runs a
 version against the test set without persisting.
 """
+import logging
+
 from django.db.models import Exists, Max, OuterRef
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
@@ -11,7 +13,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.accounts.permissions import IsPromptAuthor
-from apps.pipeline.models import DryRunJob
+from apps.pipeline.models import DryRunJob, JobStatus
 
 from .lint.linter import lint_version
 from .models import PromptDefinition, PromptKind, PromptTestSample, PromptVersion
@@ -21,6 +23,8 @@ from .serializers import (
     PromptTestSampleSerializer,
     PromptVersionSerializer,
 )
+
+logger = logging.getLogger("apps.prompts")
 
 
 class PromptDefinitionViewSet(viewsets.ModelViewSet):
@@ -148,7 +152,15 @@ class PromptVersionViewSet(
         version = self.get_object()
         ids = request.data.get("sample_ids") or []
         job = DryRunJob.objects.create(version=version, sample_ids=list(ids))
-        dispatch_dry_run(job.id)  # local runs it inline; deployment/thread return immediately
+        try:
+            dispatch_dry_run(job.id)  # local runs it inline; deployment/thread return immediately
+        except Exception:
+            # e.g. deployment mode with no worker/server — mark failed, don't 500 or orphan it.
+            logger.warning("dryrun: dispatch failed job=%s", job.id)  # safe code only, never PHI
+            job.status = JobStatus.FAILED
+            job.errors = [{"code": "dispatch_failed"}]
+            job.finished_at = timezone.now()
+            job.save(update_fields=["status", "errors", "finished_at", "updated_at"])
         job.refresh_from_db()
         return Response(DryRunJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
