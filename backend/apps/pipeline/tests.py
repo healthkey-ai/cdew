@@ -1,8 +1,10 @@
 import base64
 from unittest.mock import patch
 
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.core.management import get_commands
+from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -30,6 +32,21 @@ _PNG = base64.b64decode(
 def _doc(content=b"Hemoglobin 9.1 g/dL low value here.", name="a.txt", ctype="text/plain", patient="P1"):
     doc, _ = ingest_upload(SimpleUploadedFile(name, content, content_type=ctype), patient)
     return doc
+
+
+class PrefectServeCommandTests(SimpleTestCase):
+    """Local Prefect serve command (#53). Hermetic — imports the flow but never
+    starts a server (`.serve()` is not invoked)."""
+
+    def test_command_is_registered(self):
+        assert get_commands().get("prefect_serve") == "apps.pipeline"
+
+    def test_deployment_setting_matches_flow(self):
+        # run_deployment(PREFECT_DEPLOYMENT) must target the served flow's name.
+        from apps.pipeline.flows import extract_document
+
+        flow_name = settings.PREFECT_DEPLOYMENT.split("/")[0]
+        assert flow_name == extract_document.name == "extract-document"
 
 
 class PipelineServiceTests(TestCase):
