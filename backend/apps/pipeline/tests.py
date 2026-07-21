@@ -227,6 +227,26 @@ class JobApiTests(APITestCase):
         f = SimpleUploadedFile("labs.txt", b"Sodium 140 mmol/L within range.", content_type="text/plain")
         return self.client.post("/api/v1/documents/", {"file": f, "patient_ref": patient}, format="multipart")
 
+    def test_config_endpoint_exposes_prefect_ui_url(self):
+        r = self.client.get("/api/v1/config/")
+        assert r.status_code == 200
+        assert r.json()["prefect_ui_url"].startswith("http")
+
+    def test_cancel_marks_running_job_cancelled(self):
+        # No prefect_flow_run_id (local dispatch) → Prefect isn't touched.
+        job = ExtractionJob.objects.create(document=_doc(), status=JobStatus.RUNNING, stage=Stage.EXTRACT)
+        r = self.client.post(f"/api/v1/jobs/{job.id}/cancel/")
+        assert r.status_code == 200, r.content
+        assert r.json()["status"] == JobStatus.CANCELLED
+        job.refresh_from_db()
+        assert job.status == JobStatus.CANCELLED and job.stage == Stage.DONE
+
+    def test_cancel_is_noop_when_terminal(self):
+        job = ExtractionJob.objects.create(document=_doc(), status=JobStatus.COMPLETED)
+        r = self.client.post(f"/api/v1/jobs/{job.id}/cancel/")
+        assert r.status_code == 200
+        assert r.json()["status"] == JobStatus.COMPLETED  # unchanged
+
     def test_upload_dispatch_failure_marks_job_failed(self):
         # e.g. deployment mode with no worker — upload still succeeds, job is failed.
         with patch("apps.documents.views.dispatch_extract", side_effect=RuntimeError("no worker")):
