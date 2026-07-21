@@ -32,8 +32,9 @@ def classify_task(doc_id: int) -> list[str]:
     try:
         doc = SourceDocument.objects.get(id=doc_id)
         return classify_document(doc).routed_types
-    except Exception:
-        logger.warning("task: classify failed doc=%s", doc_id)
+    except Exception as exc:
+        # Log the exception *class* only (safe — not PHI); drop the message/chain.
+        logger.warning("task: classify failed doc=%s err=%s", doc_id, type(exc).__name__)
         raise RuntimeError("classify_failed") from None
 
 
@@ -51,8 +52,8 @@ def extract_one_task(doc_id: int, definition_id: int) -> int:
         if version is None:
             return 0
         return len(run_extractor(doc, definition, version, doc.text.content))
-    except Exception:
-        logger.warning("task: extract failed doc=%s def=%s", doc_id, definition_id)
+    except Exception as exc:
+        logger.warning("task: extract failed doc=%s def=%s err=%s", doc_id, definition_id, type(exc).__name__)
         raise RuntimeError("extract_failed") from None
 
 
