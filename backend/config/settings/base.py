@@ -217,6 +217,18 @@ LLM_SEED = env.int("LLM_SEED", default=42)
 CLASSIFIER_SCORES_FN = env("CLASSIFIER_SCORES_FN", default="")
 # Same seam for extraction (apps.prompts.agents.extract_facts by default).
 EXTRACT_FACTS_FN = env("EXTRACT_FACTS_FN", default="")
+
+# ── Document AI — geometry OCR for the review overlay (design §9, #66) ───────
+# Token bounding boxes + rendered page images (digital + scanned) from the
+# `ht-phr` OCR processor (BAA), via ADC. Off unless DOCAI_ENABLED + a processor id.
+DOCAI_ENABLED = env.bool("DOCAI_ENABLED", default=False)
+DOCAI_LOCATION = env("DOCAI_LOCATION", default="us")
+DOCAI_PROCESSOR_ID = env("DOCAI_PROCESSOR_ID", default="")
+# Boundary seam (dotted path to an ocr(content, mime_type) callable). Empty → the
+# real client (apps.documents.geometry.docai.ocr). Tests point this at a
+# deterministic double so CI never calls Document AI.
+DOCAI_OCR_FN = env("DOCAI_OCR_FN", default="")
+
 # Cap on concurrent gemini calls (design §6) — enforced as a Prefect global
 # concurrency limit (tag "gemini") when the extract fan-out runs under the
 # self-hosted deployment. Keeps workers × per-call concurrency under the quota.

@@ -10,6 +10,7 @@ django-storages[s3,google]==1.14.4   # GCS preferred, S3 fallback (PHI: private 
 
 # ── Document parsing (Phase 1) ──
 markitdown==0.0.1a3                   # PDF/DOCX/XLSX/image/HTML → Markdown text
+google-cloud-documentai>=2.24,<4      # geometry OCR (token bboxes + page images) for review overlay (#66)
 
 # ── Orchestration (Phase 2) ──
 prefect>=3.0,<4.0                     # per-document flow; self-hosted on GCP (staging), local pool (dev)

@@ -20,6 +20,8 @@ MEDIA_ROOT = tempfile.mkdtemp(prefix="cdew-test-media-")
 # Deterministic classifier + extractor doubles — no gemini calls in CI (design §10).
 CLASSIFIER_SCORES_FN = "apps.prompts.testing.keyword_scores"
 EXTRACT_FACTS_FN = "apps.prompts.testing.canned_facts"
+# Document AI double — no Doc AI calls in CI (design §9, #66).
+DOCAI_OCR_FN = "apps.documents.geometry.testing.fake_ocr"
 
 # Pin pipeline toggles regardless of a dev `.env` (which may flip these on for the
 # local engine) so tests are hermetic: dispatch inline, and don't auto-classify on
