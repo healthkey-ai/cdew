@@ -29,6 +29,14 @@ class Command(BaseCommand):
 
         from apps.pipeline.flows import dry_run_flow, extract_document
 
+        # Prefect runs each flow in a subprocess that loads the flow "from storage"
+        # without the Django project root importable — so `django.setup()` there
+        # can't find `apps.*` / `config.*`. Put the root on PYTHONPATH; the
+        # subprocess inherits it (reliable, unlike deriving it from __file__/cwd).
+        os.environ["PYTHONPATH"] = os.pathsep.join(
+            p for p in (str(settings.BASE_DIR), os.environ.get("PYTHONPATH", "")) if p
+        )
+
         extract_dep = _dep_name(getattr(settings, "PREFECT_DEPLOYMENT", "extract-document/default"))
         dryrun_dep = _dep_name(getattr(settings, "PREFECT_DRYRUN_DEPLOYMENT", "dry-run/default"))
 
