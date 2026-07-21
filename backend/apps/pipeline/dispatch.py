@@ -83,3 +83,38 @@ def _dispatch_dry_run_deployment(job_id: int) -> None:
         timeout=0,
     )
     DryRunJob.objects.filter(id=job_id).update(prefect_flow_run_id=str(getattr(run, "id", "")))
+
+
+def dispatch_geometry(doc_id: int) -> None:
+    """Dispatch on-demand geometry compute for a document (#67), same backends."""
+    backend = getattr(settings, "PREFECT_DISPATCH", "local")
+    if backend == "deployment":
+        _dispatch_geometry_deployment(doc_id)
+    elif backend == "thread":
+        threading.Thread(target=_run_geometry_flow, args=(doc_id,), daemon=True).start()
+    else:  # local
+        from apps.documents.geometry.service import execute_geometry
+
+        execute_geometry(doc_id)
+
+
+def _run_geometry_flow(doc_id: int) -> None:
+    try:
+        from .flows import geometry_flow
+
+        geometry_flow(doc_id)
+    except Exception:
+        logger.warning("geometry: flow thread crashed doc=%s", doc_id)
+
+
+def _dispatch_geometry_deployment(doc_id: int) -> None:
+    from prefect.deployments import run_deployment
+
+    from apps.documents.models import DocumentGeometry
+
+    run = run_deployment(
+        name=settings.PREFECT_GEOMETRY_DEPLOYMENT,
+        parameters={"doc_id": doc_id},
+        timeout=0,
+    )
+    DocumentGeometry.objects.filter(document_id=doc_id).update(prefect_flow_run_id=str(getattr(run, "id", "")))

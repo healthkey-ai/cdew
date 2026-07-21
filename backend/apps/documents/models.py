@@ -170,3 +170,32 @@ class ExtractionRecord(models.Model):
 
     def __str__(self):
         return f"extraction doc#{self.document_id} {self.extractor_key} ({self.status})"
+
+
+class GeometryStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    READY = "ready", "Ready"
+    FAILED = "failed", "Failed"
+
+
+class DocumentGeometry(models.Model):
+    """Cached Document AI geometry for a document (design §9, #67): per-page
+    dimensions + the stored page-image path, and per-token text + **normalized**
+    bounding box. Computed on-demand (first review) then reused. Page images live in
+    the private object store; token text is PHI (same boundary as the parsed text)."""
+
+    document = models.OneToOneField(SourceDocument, on_delete=models.CASCADE, related_name="geometry")
+    status = models.CharField(max_length=16, choices=GeometryStatus.choices, default=GeometryStatus.PENDING)
+    pages = models.JSONField(default=list)   # [{page, width, height, image_path, image_mime}]
+    tokens = models.JSONField(default=list)  # [{page, text, bbox:[x0,y0,x1,y1]}] — bbox normalized 0..1
+    errors = models.JSONField(default=list)  # [{"code": "..."}] — safe category codes only, never PHI
+    prefect_flow_run_id = models.CharField(max_length=64, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "document_geometry"
+
+    def __str__(self):
+        return f"geometry doc#{self.document_id} {self.status}"
