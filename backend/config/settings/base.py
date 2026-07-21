@@ -230,6 +230,8 @@ PREFECT_GEMINI_CONCURRENCY = env.int("PREFECT_GEMINI_CONCURRENCY", default=8)
 PREFECT_DISPATCH = env("PREFECT_DISPATCH", default="local")
 PREFECT_DEPLOYMENT = env("PREFECT_DEPLOYMENT", default="extract-document/default")
 PREFECT_DRYRUN_DEPLOYMENT = env("PREFECT_DRYRUN_DEPLOYMENT", default="dry-run/default")
+# Prefect UI base URL, surfaced to the frontend (config endpoint) for run links (#57).
+PREFECT_UI_URL = env("PREFECT_UI_URL", default="http://localhost:4200")
 # PREFECT_API_URL is read by Prefect itself from the environment (self-hosted on GCP
 # for staging/prod; unset → ephemeral local for `thread` dev runs).
 # Per-task retry policy for the LLM tasks (apps.pipeline.tasks, #54).
