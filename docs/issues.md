@@ -7,6 +7,9 @@ GitHub issues distilled from [`TODO.md`](../TODO.md), the
 [Filed issues](#filed-issues) for the `IS-id → #issue` map. Each filed issue carries its scope +
 acceptance criteria; this doc keeps the rationale, dependencies, and the map.
 
+A later set — the **[Prefect orchestration](#prefect-orchestration--local-engine)** tickets
+(#53–#57) — was filed directly from the async-pipeline plan and lives in its own section below.
+
 `TODO.md` + the plan remain the source of truth; this doc re-shapes them into discrete,
 independently-shippable issues. The stable **`IS-id` stays in each issue title** so the cross-issue
 "depends on IS-0nn" references resolve; if issues are renumbered, update the map below.
@@ -60,6 +63,32 @@ Grouped by milestone; ordered by `IS-id` for lookup.
 
 **Status of the product:** v1 is complete end-to-end (Phases 0–6). Everything below is post-v1:
 delivery (staging/prod), the deferred next iterations (commit to promop, FHIR-sync), and polish.
+
+---
+
+## Prefect orchestration — local engine
+
+Filed directly from the async-pipeline plan (outside the `IS-` backlog above). These move the
+long-running LLM work onto a real Prefect engine locally (design §6), and complement **IS-005
+(#8)**, which stays for the self-hosted GCP control plane. Precursors this session: Vertex/BAA
+([#48](https://github.com/healthkey-ai/cdew/issues/48)), the test-set feature
+([#49](https://github.com/healthkey-ai/cdew/issues/49)), and deterministic sampling
+([#50](https://github.com/healthkey-ai/cdew/issues/50)).
+
+| Issue | Scope | Status |
+|-------|-------|--------|
+| [#53](https://github.com/healthkey-ai/cdew/issues/53) | Local dev runtime — `prefect server` + `manage.py prefect_worker`, Make targets, Postgres-backed server option | ✅ Done |
+| [#54](https://github.com/healthkey-ai/cdew/issues/54) | Decompose classify/extract into gemini-tagged `@task`s (per-call retries + the `gemini` concurrency limit) | ✅ Done |
+| [#55](https://github.com/healthkey-ai/cdew/issues/55) | Async Test Set dry-run/extract — `DryRunJob` submit/poll, one gemini task per sample | ✅ Done |
+| [#56](https://github.com/healthkey-ai/cdew/issues/56) | Run OCR as an orchestrated task (retry/concurrency seam) | 🟡 Ready — gated on the OCR engine (IS-015d #21 / IS-016 #22) |
+| [#57](https://github.com/healthkey-ai/cdew/issues/57) | Workflow page — live run monitor + Stop cancels the Prefect flow run + PHI-safe activity log | ✅ Done |
+
+**Notes**
+
+- **#54 unblocks IS-005 (#8) and IS-033 (#40)** — their "enforce the `gemini` limit" acceptance is
+  only meaningful once the LLM steps are tasks.
+- Design invariants held throughout: job-state transitions stay in `service.py`/`dryrun.py`, and the
+  `local` dispatch path imports no Prefect runtime so CI stays hermetic.
 
 ---
 
