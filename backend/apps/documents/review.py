@@ -39,7 +39,8 @@ class ExtractionReviewViewSet(
             rec.payload = data["payload"]
 
         span = data.get("span")  # {char_start, char_end} — reviewer adjusts the highlight
-        if span is not None:
+        span_changed = span is not None
+        if span_changed:
             text = getattr(getattr(rec.document, "text", None), "content", "") or ""
             cs, ce = span.get("char_start"), span.get("char_end")
             if not (isinstance(cs, int) and isinstance(ce, int) and 0 <= cs <= ce <= len(text)):
@@ -55,6 +56,10 @@ class ExtractionReviewViewSet(
         rec.reviewed_by = self._reviewer()
         rec.reviewed_at = timezone.now()
         rec.save()
+        if span_changed:  # snippet moved → re-map its geometry box (#68)
+            from .geometry.mapping import remap_record
+
+            remap_record(rec)
         return Response(ExtractionRecordSerializer(rec).data)
 
     def create(self, request):
@@ -95,4 +100,7 @@ class ExtractionReviewViewSet(
             reviewed_by=reviewer,
             reviewed_at=timezone.now(),
         )
+        from .geometry.mapping import remap_record  # box the new fact if geometry is ready (#68)
+
+        remap_record(rec)
         return Response(ExtractionRecordSerializer(rec).data, status=status.HTTP_201_CREATED)
