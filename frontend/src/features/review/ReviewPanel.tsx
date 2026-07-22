@@ -18,6 +18,7 @@ import {
   useGeometry,
   useTriggerGeometry,
 } from "@/features/documents/api";
+import { isJobActive, useJobs } from "@/features/workflow/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useReviewActions } from "./api";
@@ -187,6 +188,17 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
       qc.invalidateQueries({ queryKey: ["documents", docId, "extractions"] });
     }
   }, [geomStatus, docId, qc]);
+
+  // Facts are written at the end of the extraction run. If the panel is opened
+  // mid-run, refetch when this doc's job finishes so they appear without a reload.
+  const jobs = useJobs();
+  const job = jobs.data?.find((j) => j.document === docId);
+  const extracting = job ? isJobActive(job.status) : false;
+  useEffect(() => {
+    if (job && !isJobActive(job.status)) {
+      qc.invalidateQueries({ queryKey: ["documents", docId, "extractions"] });
+    }
+  }, [job?.status, docId, qc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [newSnippet, setNewSnippet] = useState("");
   const [newDomain, setNewDomain] = useState("labs");
@@ -418,7 +430,10 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
                 );
               })}
               {facts.data && facts.data.length === 0 && (
-                <li className="text-xs text-muted-foreground">No facts.</li>
+                <li className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {extracting && <Loader2 className="size-3 animate-spin" />}
+                  {extracting ? "Extracting facts…" : "No facts."}
+                </li>
               )}
             </ul>
 
