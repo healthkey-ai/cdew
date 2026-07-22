@@ -67,6 +67,43 @@ class BboxMappingTests(TestCase):
         assert snippet_to_bbox("mmol/L", tokens)["rects"] == [[0.35, 0.1, 0.45, 0.12]]  # single token
         assert snippet_to_bbox("Potassium", tokens) is None  # not present → null
 
+    def test_record_to_bbox_anchors_on_name_and_returns_row_boxes(self):
+        """A lab fact maps to its whole row (name·value·range·units), anchored on
+        the name, stopping before the descriptive range prose (#68)."""
+        from types import SimpleNamespace
+
+        from apps.documents.geometry.mapping import record_to_bbox
+
+        def row(y, *words):
+            return [
+                {"page": 1, "text": w, "bbox": [round(0.05 + i * 0.09, 5), y, round(0.13 + i * 0.09, 5), y + 0.02]}
+                for i, w in enumerate(words)
+            ]
+
+        # Two rows; "5" appears on both, but the fact anchors on its name row.
+        tokens = row(0.10, "Estradiol", "120", "43-180", "pg", "/", "mL", "Premenopausal", "range")
+        tokens += row(0.20, "Progesterone", "5", "3.3-22.5", "ng", "/", "mL")
+        rec = SimpleNamespace(
+            payload={"test_name": "Estradiol", "value": 5},
+            provenance={"snippet": "5", "bbox": None},
+        )
+        box = record_to_bbox(rec, tokens)
+        assert box["page"] == 1
+        # Estradiol · 120 · 43-180 · pg · / · mL  (6 boxes) — prose "Premenopausal" excluded.
+        assert box["rects"] == [t["bbox"] for t in tokens[:6]]
+
+    def test_record_to_bbox_falls_back_to_snippet_without_name(self):
+        from types import SimpleNamespace
+
+        from apps.documents.geometry.mapping import record_to_bbox
+
+        tokens = [
+            {"page": 1, "text": "Sodium", "bbox": [0.1, 0.1, 0.2, 0.12]},
+            {"page": 1, "text": "140", "bbox": [0.25, 0.1, 0.3, 0.12]},
+        ]
+        rec = SimpleNamespace(payload={}, provenance={"snippet": "Sodium 140", "bbox": None})
+        assert record_to_bbox(rec, tokens) == {"page": 1, "rects": [[0.1, 0.1, 0.2, 0.12], [0.25, 0.1, 0.3, 0.12]]}
+
     def _rec(self, doc, snippet, **extra):
         from apps.documents.models import ExtractionRecord, ExtractionStatus
 
