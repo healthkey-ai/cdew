@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Check, FileText, Image as ImageIcon, Loader2, Pencil, X } from "lucide-react";
@@ -176,6 +177,16 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
     setDocView("image");
     if (geometry.data?.status !== "ready") triggerGeom.mutate(); // POST is a no-op if already ready
   };
+
+  // Geometry populates each fact's bbox server-side; refetch the extractions once
+  // it's ready so the overlay picks up the boxes without needing a manual edit.
+  const qc = useQueryClient();
+  const geomStatus = geometry.data?.status;
+  useEffect(() => {
+    if (geomStatus === "ready") {
+      qc.invalidateQueries({ queryKey: ["documents", docId, "extractions"] });
+    }
+  }, [geomStatus, docId, qc]);
 
   const [newSnippet, setNewSnippet] = useState("");
   const [newDomain, setNewDomain] = useState("labs");
