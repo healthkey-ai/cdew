@@ -334,19 +334,23 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
                 return (
                   <li
                     key={f.id}
+                    onClick={() => setActive(f)}
                     className={cn(
-                      "rounded-md border p-2 text-xs transition-colors",
+                      "cursor-pointer rounded-md border p-2 text-xs transition-colors hover:border-warning/60",
                       active?.id === f.id && "border-warning ring-1 ring-warning/40",
                     )}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <button className="flex items-center gap-1.5 text-left" onClick={() => setActive(f)}>
+                      <div className="flex items-center gap-1.5">
                         <Badge variant="secondary">{f.domain || f.extractor_key}</Badge>
                         <Badge variant={sb.variant} className={sb.className}>
                           {f.status}
                         </Badge>
-                      </button>
-                      <div className="flex gap-1">
+                        {docView === "image" && !f.provenance.bbox && (
+                          <span className="text-[10px] text-muted-foreground">not located</span>
+                        )}
+                      </div>
+                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -384,7 +388,7 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
                       </div>
                     </div>
                     {editId === f.id ? (
-                      <div className="mt-2 space-y-1.5">
+                      <div className="mt-2 space-y-1.5" onClick={(e) => e.stopPropagation()}>
                         <Textarea
                           className="h-16 font-mono text-xs"
                           value={editJson}
