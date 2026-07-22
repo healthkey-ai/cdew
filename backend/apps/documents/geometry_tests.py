@@ -1,6 +1,9 @@
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
+from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.accounts.models import Identity, Role, RoleAssignment
 from apps.documents.geometry.docai import _ocr_fn
 from apps.documents.geometry.testing import fake_ocr
 from apps.documents.ingest import ingest_upload
@@ -100,3 +103,33 @@ class BboxMappingTests(TestCase):
         remap_record(rec)  # e.g. reviewer just added the fact
         rec.refresh_from_db()
         assert rec.provenance["bbox"]["page"] == 1 and len(rec.provenance["bbox"]["rects"]) == 2
+
+
+class GeometryEndpointTests(APITestCase):
+    """Geometry trigger/status + page-image endpoints (#69), reviewer-gated."""
+
+    def setUp(self):
+        rev = Identity.objects.create(issuer="urn:local", sub="rev-geo", email="rev@x.org")
+        RoleAssignment.objects.create(identity=rev, role=Role.REVIEWER)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(rev).access_token}")
+        self.doc, _ = ingest_upload(
+            SimpleUploadedFile("e.txt", b"Sodium 140 mmol/L", content_type="text/plain"), "EP"
+        )
+
+    def test_post_computes_and_get_polls(self):
+        r = self.client.post(f"/api/v1/documents/{self.doc.id}/geometry/")
+        assert r.status_code == 200, r.content
+        assert r.json()["status"] == "ready"  # local dispatch runs inline
+        assert r.json()["pages"][0]["has_image"] is True
+        assert self.client.get(f"/api/v1/documents/{self.doc.id}/geometry/").json()["status"] == "ready"
+
+    def test_page_image_streams(self):
+        self.client.post(f"/api/v1/documents/{self.doc.id}/geometry/")
+        r = self.client.get(f"/api/v1/documents/{self.doc.id}/pages/1/image/")
+        assert r.status_code == 200
+        assert r["Content-Type"] == "image/png"
+
+    def test_geometry_requires_reviewer(self):
+        plain = Identity.objects.create(issuer="urn:local", sub="plain-geo", email="p@x.org")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(plain).access_token}")
+        assert self.client.post(f"/api/v1/documents/{self.doc.id}/geometry/").status_code == 403

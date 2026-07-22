@@ -7,12 +7,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.accounts.permissions import IsReviewer
-from apps.pipeline.dispatch import dispatch_extract
+from apps.pipeline.dispatch import dispatch_extract, dispatch_geometry
 from apps.pipeline.models import ExtractionJob, JobStatus, Stage
 
 from .ingest import IngestError, ingest_upload
-from .models import DocumentText, ExtractionStatus, SourceDocument
+from .models import DocumentGeometry, DocumentText, ExtractionStatus, GeometryStatus, SourceDocument
 from .serializers import (
+    DocumentGeometrySerializer,
     DocumentTextSerializer,
     ExtractionRecordSerializer,
     SourceDocumentSerializer,
@@ -30,7 +31,7 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
-        if self.action in ("verify", "destroy"):
+        if self.action in ("verify", "destroy", "geometry", "page_image"):
             return [IsReviewer()]
         return super().get_permissions()
 
@@ -111,6 +112,43 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         doc = self.get_object()
         qs = doc.extractions.all().order_by("extractor_key", "id")
         return Response(ExtractionRecordSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=["get", "post"])
+    def geometry(self, request, pk=None):
+        """Reviewer-gated geometry for the overlay (#69). POST computes on-demand
+        (via the engine) unless already ready; GET returns the current status for
+        polling. Facts' provenance.bbox is populated when it becomes ready (#68)."""
+        doc = self.get_object()
+        geom, _ = DocumentGeometry.objects.get_or_create(document=doc)
+
+        if request.method == "POST" and geom.status != GeometryStatus.READY:
+            geom.status = GeometryStatus.PENDING
+            geom.errors = []
+            geom.save(update_fields=["status", "errors", "updated_at"])
+            try:
+                dispatch_geometry(doc.id)  # local runs inline → ready; deployment/thread → poll
+            except Exception:
+                # e.g. deployment mode with no worker — fail cleanly, don't 500.
+                logger.warning("geometry: dispatch failed doc=%s", doc.id)  # safe code only
+                geom.status = GeometryStatus.FAILED
+                geom.errors = [{"code": "dispatch_failed"}]
+                geom.save(update_fields=["status", "errors", "updated_at"])
+            geom.refresh_from_db()
+
+        return Response(DocumentGeometrySerializer(geom).data)
+
+    @action(detail=True, methods=["get"], url_path=r"pages/(?P<page>\d+)/image")
+    def page_image(self, request, pk=None, page=None):
+        """Stream a cached page image (reviewer-gated, #69)."""
+        from django.core.files.storage import default_storage
+        from django.http import FileResponse
+
+        doc = self.get_object()
+        geom = DocumentGeometry.objects.filter(document=doc).first()
+        pg = next((p for p in (geom.pages if geom else []) if str(p.get("page")) == str(page)), None)
+        if not pg or not pg.get("image_path") or not default_storage.exists(pg["image_path"]):
+            return Response({"detail": "no image for this page."}, status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(default_storage.open(pg["image_path"], "rb"), content_type=pg.get("image_mime") or "image/png")
 
     @action(detail=True, methods=["post"])
     def verify(self, request, pk=None):
