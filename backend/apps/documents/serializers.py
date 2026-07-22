@@ -1,6 +1,24 @@
 from rest_framework import serializers
 
-from .models import DocumentText, ExtractionRecord, SourceDocument
+from .models import DocumentGeometry, DocumentText, ExtractionRecord, SourceDocument
+
+
+class DocumentGeometrySerializer(serializers.ModelSerializer):
+    """Geometry status for the review overlay (#69). Exposes page dims + whether a
+    page image exists (fetched via /pages/{n}/image/) — never the storage path."""
+
+    pages = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DocumentGeometry
+        fields = ("status", "pages", "errors", "updated_at")
+        read_only_fields = fields
+
+    def get_pages(self, obj):
+        return [
+            {"page": p["page"], "width": p["width"], "height": p["height"], "has_image": bool(p.get("image_path"))}
+            for p in (obj.pages or [])
+        ]
 
 
 class SourceDocumentSerializer(serializers.ModelSerializer):
