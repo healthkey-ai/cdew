@@ -42,6 +42,10 @@ def execute_geometry(doc_id: int, *, runner=None) -> DocumentGeometry:
         geom.status = GeometryStatus.READY
         geom.errors = []
         geom.save(update_fields=["pages", "tokens", "status", "errors", "updated_at"])
+        # Geometry ready → map each fact's snippet to its bbox (#68).
+        from .mapping import populate_bboxes
+
+        populate_bboxes(doc)
     except Exception:
         # Never log exception text — it can carry PHI. Safe code only.
         logger.warning("geometry: failed doc=%s", doc_id)
