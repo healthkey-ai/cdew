@@ -8,6 +8,7 @@ import { DocumentViewPage } from "@/features/documents/DocumentViewPage";
 import { InboxPage } from "@/features/documents/InboxPage";
 import { ExtractorsPage } from "@/features/extractors/ExtractorsPage";
 import { ProcessedPage } from "@/features/review/ProcessedPage";
+import { ReviewDocumentPage } from "@/features/review/ReviewDocumentPage";
 import { ReviewPage } from "@/features/review/ReviewPage";
 import { TaxonomiesPage } from "@/features/taxonomies/TaxonomiesPage";
 import { UsersPage } from "@/features/users/UsersPage";
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/inbox/:docId" element={<DocumentViewPage />} />
           <Route path="/workflow" element={<WorkflowPage />} />
           <Route path="/review" element={<ReviewPage />} />
+          <Route path="/review/:docId" element={<ReviewDocumentPage />} />
           <Route path="/processed" element={<ProcessedPage />} />
 
           {/* Prompt authoring (prompt_author / admin) */}

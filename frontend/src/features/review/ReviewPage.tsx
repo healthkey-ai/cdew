@@ -26,8 +26,8 @@ export function ReviewPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Review</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Processed documents ready to review. Open one to see the parsed document and its extracted
-          facts.
+          Processed documents ready to review. Open one to verify facts on the document (text or image
+          with bounding boxes) and approve/correct/reject.
         </p>
       </div>
 
@@ -59,7 +59,7 @@ export function ReviewPage() {
               {rows.map((d) => (
                 <TableRow key={d.id}>
                   <TableCell className="font-medium">
-                    <Link to={`/inbox/${d.id}`} className="text-primary hover:underline">
+                    <Link to={`/review/${d.id}`} className="text-primary hover:underline">
                       {d.original_filename || `doc#${d.id}`}
                     </Link>
                   </TableCell>
