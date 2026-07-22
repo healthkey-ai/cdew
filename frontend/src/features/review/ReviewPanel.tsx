@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, Pencil, X } from "lucide-react";
+import { Check, FileText, Image as ImageIcon, Loader2, Pencil, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,9 +9,143 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { type ExtractionRecord, useDocumentExtractions, useDocumentText } from "@/features/documents/api";
+import {
+  type ExtractionRecord,
+  type Geometry,
+  useDocumentExtractions,
+  useDocumentText,
+  useGeometry,
+  useTriggerGeometry,
+} from "@/features/documents/api";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useReviewActions } from "./api";
+
+/** Fetch a page image as an authed blob → object URL (an <img src> can't send the
+ * Bearer token). Revokes on unmount. */
+function usePageImageUrl(docId: number, page: number): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let obj: string | null = null;
+    let cancelled = false;
+    api
+      .get(`/documents/${docId}/pages/${page}/image/`, { responseType: "blob" })
+      .then((r) => {
+        if (!cancelled) {
+          obj = URL.createObjectURL(r.data as Blob);
+          setUrl(obj);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (obj) URL.revokeObjectURL(obj);
+    };
+  }, [docId, page]);
+  return url;
+}
+
+/** One page image with SVG bbox overlays. Normalized boxes (0..1) map to the
+ * image via a 0 0 1 1 viewBox. Click a box → select the fact. */
+function PageOverlay({
+  docId,
+  page,
+  facts,
+  activeId,
+  onPick,
+  scrollTo,
+}: {
+  docId: number;
+  page: number;
+  facts: ExtractionRecord[];
+  activeId: number | null;
+  onPick: (f: ExtractionRecord) => void;
+  scrollTo: boolean;
+}) {
+  const url = usePageImageUrl(docId, page);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (scrollTo) ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [scrollTo]);
+  const pageFacts = facts.filter((f) => f.provenance.bbox?.page === page);
+  return (
+    <div ref={ref} className="relative overflow-hidden rounded border bg-white">
+      {url ? (
+        <img src={url} alt={`page ${page}`} className="block w-full" />
+      ) : (
+        <div className="flex h-40 items-center justify-center text-xs text-muted-foreground">loading page {page}…</div>
+      )}
+      <svg viewBox="0 0 1 1" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
+        {pageFacts.flatMap((f) =>
+          (f.provenance.bbox?.rects ?? []).map((r, i) => (
+            <rect
+              key={`${f.id}-${i}`}
+              x={r[0]}
+              y={r[1]}
+              width={Math.max(0, r[2] - r[0])}
+              height={Math.max(0, r[3] - r[1])}
+              vectorEffect="non-scaling-stroke"
+              strokeWidth={1.5}
+              onClick={() => onPick(f)}
+              className={cn(
+                "cursor-pointer transition-colors",
+                activeId === f.id
+                  ? "fill-warning/30 stroke-warning"
+                  : "fill-primary/5 stroke-primary/40 hover:fill-primary/20",
+              )}
+            />
+          )),
+        )}
+      </svg>
+    </div>
+  );
+}
+
+/** The document-image view: pages with fact bbox overlays, or loading/failed state. */
+function DocumentImageView({
+  docId,
+  geometry,
+  facts,
+  active,
+  onPick,
+}: {
+  docId: number;
+  geometry: Geometry | undefined;
+  facts: ExtractionRecord[];
+  active: ExtractionRecord | null;
+  onPick: (f: ExtractionRecord) => void;
+}) {
+  if (!geometry || geometry.status === "pending") {
+    return (
+      <div className="flex h-40 items-center justify-center gap-2 rounded-md border text-xs text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        Extracting document geometry…
+      </div>
+    );
+  }
+  if (geometry.status === "failed") {
+    return (
+      <div className="rounded-md border p-3 text-xs text-destructive">
+        Couldn't extract geometry ({geometry.errors?.[0]?.code ?? "error"}). Use the Text view.
+      </div>
+    );
+  }
+  return (
+    <div className="max-h-[32rem] space-y-3 overflow-auto">
+      {geometry.pages.map((p) => (
+        <PageOverlay
+          key={p.page}
+          docId={docId}
+          page={p.page}
+          facts={facts}
+          activeId={active?.id ?? null}
+          onPick={onPick}
+          scrollTo={active?.provenance.bbox?.page === p.page}
+        />
+      ))}
+    </div>
+  );
+}
 
 const CATEGORIES = ["office_visit", "diagnosis_hrv", "labs", "biopsy", "imaging", "other"];
 
@@ -33,6 +167,15 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
   const [editId, setEditId] = useState<number | null>(null);
   const [editJson, setEditJson] = useState("");
   const [category, setCategory] = useState("labs");
+
+  // Document view: parsed text (default) or the image with bbox overlays (#70).
+  const [docView, setDocView] = useState<"text" | "image">("text");
+  const geometry = useGeometry(docId, docView === "image");
+  const triggerGeom = useTriggerGeometry(docId);
+  const showImage = () => {
+    setDocView("image");
+    if (geometry.data?.status !== "ready") triggerGeom.mutate(); // POST is a no-op if already ready
+  };
 
   const [newSnippet, setNewSnippet] = useState("");
   const [newDomain, setNewDomain] = useState("labs");
@@ -102,19 +245,50 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/* left: parsed text with highlight */}
+          {/* left: document — parsed text with char highlight, or image with bbox overlays */}
           <div className="space-y-2">
-            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-relaxed">
-              {Array.isArray(highlighted) ? (
-                <>
-                  {highlighted[0]}
-                  <mark className="rounded bg-warning/40 px-0.5">{highlighted[1]}</mark>
-                  {highlighted[2]}
-                </>
-              ) : (
-                highlighted || "(no text)"
-              )}
-            </pre>
+            <div className="flex items-center gap-1">
+              <Button
+                variant={docView === "text" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7"
+                onClick={() => setDocView("text")}
+              >
+                <FileText className="size-3.5" />
+                Text
+              </Button>
+              <Button
+                variant={docView === "image" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7"
+                onClick={showImage}
+              >
+                <ImageIcon className="size-3.5" />
+                Document
+              </Button>
+            </div>
+
+            {docView === "image" ? (
+              <DocumentImageView
+                docId={docId}
+                geometry={geometry.data}
+                facts={facts.data ?? []}
+                active={active}
+                onPick={setActive}
+              />
+            ) : (
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-relaxed">
+                {Array.isArray(highlighted) ? (
+                  <>
+                    {highlighted[0]}
+                    <mark className="rounded bg-warning/40 px-0.5">{highlighted[1]}</mark>
+                    {highlighted[2]}
+                  </>
+                ) : (
+                  highlighted || "(no text)"
+                )}
+              </pre>
+            )}
 
             <div className="space-y-2 rounded-md border p-3">
               <Label>Add a fact</Label>

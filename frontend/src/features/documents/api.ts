@@ -41,10 +41,17 @@ export interface ExtractionRecord {
     char_start: number;
     char_end: number;
     snippet: string;
+    bbox: { page: number; rects: number[][] } | null; // normalized 0..1, #68
     extractor: { key: string; version_id: number };
   };
   confidence: number;
   status: string;
+}
+
+export interface Geometry {
+  status: "pending" | "ready" | "failed";
+  pages: { page: number; width: number; height: number; has_image: boolean }[];
+  errors: { code: string }[];
 }
 
 interface Paginated<T> {
@@ -85,6 +92,26 @@ export function useDocumentExtractions(id: number | null) {
     queryKey: id ? ["documents", id, "extractions"] : ["documents", "none", "extractions"],
     enabled: id != null,
     queryFn: async () => (await api.get<ExtractionRecord[]>(`/documents/${id}/extractions/`)).data,
+  });
+}
+
+/** Geometry status for the review overlay (#69/#70). Polls while pending. Only
+ * fetched when `enabled` (the reviewer switched to the document-image view). */
+export function useGeometry(id: number | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["documents", id, "geometry"],
+    enabled: enabled && id != null,
+    queryFn: async () => (await api.get<Geometry>(`/documents/${id}/geometry/`)).data,
+    refetchInterval: (q: { state: { data?: Geometry } }) => (q.state.data?.status === "pending" ? 1500 : false),
+  });
+}
+
+/** Trigger on-demand geometry compute; seeds the poll query with the result. */
+export function useTriggerGeometry(id: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => (await api.post<Geometry>(`/documents/${id}/geometry/`)).data,
+    onSuccess: (d) => qc.setQueryData(["documents", id, "geometry"], d),
   });
 }
 
