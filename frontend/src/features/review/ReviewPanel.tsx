@@ -47,31 +47,59 @@ function usePageImageUrl(docId: number, page: number): string | null {
   return url;
 }
 
+/** Vertical center (0..1) of a fact's dominant bbox cluster on a page. A fact's
+ * boxes usually share one row; if a stray box lands elsewhere, cluster by y and
+ * take the largest group so we scroll to where the boxes actually cluster. */
+function clusterCenterY(rects: number[][]): number {
+  const ys = rects.map((r) => (r[1] + r[3]) / 2).sort((a, b) => a - b);
+  if (ys.length === 0) return 0;
+  const GAP = 0.05; // > one row-height apart → a separate cluster
+  let bestStart = 0;
+  let bestLen = 1;
+  let curStart = 0;
+  for (let i = 1; i <= ys.length; i++) {
+    if (i === ys.length || ys[i] - ys[i - 1] > GAP) {
+      if (i - curStart > bestLen) {
+        bestLen = i - curStart;
+        bestStart = curStart;
+      }
+      curStart = i;
+    }
+  }
+  const cluster = ys.slice(bestStart, bestStart + bestLen);
+  return cluster.reduce((a, b) => a + b, 0) / cluster.length;
+}
+
 /** One page image with SVG bbox overlays. Normalized boxes (0..1) map to the
  * image via a 0 0 1 1 viewBox. Click a box → select the fact. */
 function PageOverlay({
   docId,
   page,
   facts,
-  activeId,
+  active,
   onPick,
-  scrollTo,
 }: {
   docId: number;
   page: number;
   facts: ExtractionRecord[];
-  activeId: number | null;
+  active: ExtractionRecord | null;
   onPick: (f: ExtractionRecord) => void;
-  scrollTo: boolean;
 }) {
   const url = usePageImageUrl(docId, page);
-  const ref = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const activeBox = active?.provenance.bbox?.page === page ? active?.provenance.bbox : null;
+  const anchorY = activeBox ? clusterCenterY(activeBox.rects) : 0;
+  // Scroll the active fact's cluster into view on every selection change — even
+  // when the next fact is on the same page (a per-page flag wouldn't re-fire).
   useEffect(() => {
-    if (scrollTo) ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [scrollTo]);
+    if (activeBox) anchorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [active?.id, activeBox, anchorY]);
   const pageFacts = facts.filter((f) => f.provenance.bbox?.page === page);
   return (
-    <div ref={ref} className="relative overflow-hidden rounded border bg-white">
+    <div className="relative overflow-hidden rounded border bg-white">
+      {activeBox && (
+        <div ref={anchorRef} className="pointer-events-none absolute" style={{ top: `${anchorY * 100}%` }} />
+      )}
       {url ? (
         <img src={url} alt={`page ${page}`} className="block w-full" />
       ) : (
@@ -91,7 +119,7 @@ function PageOverlay({
               onClick={() => onPick(f)}
               className={cn(
                 "cursor-pointer transition-colors",
-                activeId === f.id
+                active?.id === f.id
                   ? "fill-warning/30 stroke-warning"
                   : "fill-primary/5 stroke-primary/40 hover:fill-primary/20",
               )}
@@ -135,15 +163,7 @@ function DocumentImageView({
   return (
     <div className="max-h-[32rem] space-y-3 overflow-auto">
       {geometry.pages.map((p) => (
-        <PageOverlay
-          key={p.page}
-          docId={docId}
-          page={p.page}
-          facts={facts}
-          activeId={active?.id ?? null}
-          onPick={onPick}
-          scrollTo={active?.provenance.bbox?.page === p.page}
-        />
+        <PageOverlay key={p.page} docId={docId} page={p.page} facts={facts} active={active} onPick={onPick} />
       ))}
     </div>
   );
