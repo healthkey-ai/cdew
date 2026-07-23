@@ -29,6 +29,10 @@ _ROW_TOL = 0.012
 # An alphabetic token longer than this, seen after the value, is descriptive
 # prose (e.g. "Premeno-luteal") — the row's data segment ends before it.
 _PROSE_LEN = 5
+# The name "leads" its row if it starts within this of the row's left edge. A
+# data row opens with the test name in the label column; in a prose summary the
+# same name sits mid-sentence, so this tells the real row from a text mention.
+_LEADING_TOL = 0.05
 
 
 def _norm(s: str) -> str:
@@ -99,22 +103,26 @@ def _row_has_name(row: list[dict], name_words: list[str]) -> bool:
     return all(any(w == tx or w in tx for tx in texts) for w in name_words)
 
 
-def _data_segment(row: list[dict], name_words: list[str]) -> list[list[float]]:
-    """Boxes from the first name token through the value/range/units, stopping at
+def _data_segment(row: list[dict], name_words: list[str]) -> list[dict]:
+    """Tokens from the first name token through the value/range/units, stopping at
     the first long prose word that follows a numeric token."""
     start = next((i for i, t in enumerate(row) if _norm(t["text"]) in name_words), None)
     if start is None:
         return []
-    rects: list[list[float]] = []
+    seg: list[dict] = []
     seen_num = False
     for t in row[start:]:
         txt = _norm(t["text"])
         if seen_num and txt.isalpha() and len(txt) > _PROSE_LEN:
             break
-        rects.append(t["bbox"])
+        seg.append(t)
         if any(ch.isdigit() for ch in txt):
             seen_num = True
-    return rects
+    return seg
+
+
+def _has_number(tokens: list[dict]) -> bool:
+    return any(any(ch.isdigit() for ch in _norm(t["text"])) for t in tokens)
 
 
 def record_to_bbox(rec, tokens: list[dict]) -> dict | None:
@@ -124,16 +132,25 @@ def record_to_bbox(rec, tokens: list[dict]) -> dict | None:
     name_words = _name_words(payload)
     snippet = (rec.provenance or {}).get("snippet", "")
     if name_words:
-        candidates = [(page, row) for page, row in _rows(tokens) if _row_has_name(row, name_words)]
-        if candidates:
-            # Prefer the data row (most numeric tokens) over legend/graph repeats.
-            page, row = max(
-                candidates,
-                key=lambda pr: sum(any(ch.isdigit() for ch in _norm(t["text"])) for t in pr[1]),
-            )
-            rects = _data_segment(row, name_words)
-            if rects:
-                return {"page": page, "rects": rects}
+        best = None  # (score, page, segment)
+        for page, row in _rows(tokens):
+            if not _row_has_name(row, name_words):
+                continue
+            seg = _data_segment(row, name_words)
+            if not seg:
+                continue
+            # A data row opens with the name (left edge) and carries a value; a
+            # prose mention of the name does neither. Rank on that, then take the
+            # earliest/topmost such row (the main table beats later repeats).
+            leading = seg[0]["bbox"][0] - min(t["bbox"][0] for t in row) <= _LEADING_TOL
+            has_value = _has_number(seg[1:])
+            row_yc = sum(_yc(t) for t in row) / len(row)
+            score = (leading, has_value, -page, -row_yc)
+            if best is None or score > best[0]:
+                best = (score, page, seg)
+        if best is not None:
+            _, page, seg = best
+            return {"page": page, "rects": [t["bbox"] for t in seg]}
     return snippet_to_bbox(snippet, tokens)
 
 

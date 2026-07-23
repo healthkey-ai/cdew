@@ -92,6 +92,26 @@ class BboxMappingTests(TestCase):
         # Estradiol · 120 · 43-180 · pg · / · mL  (6 boxes) — prose "Premenopausal" excluded.
         assert box["rects"] == [t["bbox"] for t in tokens[:6]]
 
+    def test_record_to_bbox_prefers_data_row_over_prose_mention(self):
+        """The name also appears in a summary paragraph (with more digits); the box
+        must latch onto the leading-name data row, not the prose (#68)."""
+        from types import SimpleNamespace
+
+        from apps.documents.geometry.mapping import record_to_bbox
+
+        def tok(page, x, y, text):
+            return {"page": page, "text": text, "bbox": [x, y, x + 0.03, y + 0.012]}
+
+        # p1 data row: name leads at the left margin, carries a value.
+        tokens = [tok(1, 0.03, 0.60, "TSH"), tok(1, 0.20, 0.60, "0.2"), tok(1, 0.30, 0.60, "0.5-3.0")]
+        # p2 prose: name buried mid-sentence, with more surrounding numbers.
+        prose = "Thyroid 1 markers 2 including TSH 3 were 4 within 5 range"
+        tokens += [tok(2, 0.05 + i * 0.05, 0.20, w) for i, w in enumerate(prose.split())]
+        rec = SimpleNamespace(payload={"test_name": "TSH", "value": 0.2}, provenance={"snippet": "0.2", "bbox": None})
+        box = record_to_bbox(rec, tokens)
+        assert box["page"] == 1  # the data row, not the p2 prose
+        assert [r[0] for r in box["rects"]] == [0.03, 0.20, 0.30]  # TSH · value · range
+
     def test_record_to_bbox_falls_back_to_snippet_without_name(self):
         from types import SimpleNamespace
 
