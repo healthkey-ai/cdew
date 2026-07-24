@@ -115,9 +115,32 @@ class ExtractProvenance(BaseModel):
 _PROVENANCE_INSTRUCTIONS = (
     "For EVERY fact you output, populate `provenance`: set `snippet` to the exact "
     "verbatim substring of the document the fact came from, and `char_start`/`char_end` "
-    "to that substring's character offsets in the document text. Set `confidence` in "
-    "[0,1]. Never output a fact that isn't supported by a verbatim snippet."
+    "to that substring's character offsets in the document text. If the document is "
+    "attached as a PDF/image and you cannot determine character offsets, set both to 0 — "
+    "the verbatim `snippet` is what matters. Set `confidence` in [0,1]. Never output a "
+    "fact that isn't supported by a verbatim snippet."
 )
+
+
+def _is_multimodal_mime(mime: str | None) -> bool:
+    """gemini reads PDFs and images natively. For these we feed the ORIGINAL
+    document, not markitdown text — markitdown flattens tables/gauge layouts and
+    detaches values from their rows (#84)."""
+    return bool(mime) and (mime == "application/pdf" or mime.startswith("image/"))
+
+
+def _extraction_input(version, text: str, document: dict | None):
+    """The agent's user input. When the original document is a PDF/image, send it
+    as BinaryContent so the model reads the true layout; otherwise send the text."""
+    if document and document.get("data") and _is_multimodal_mime(document.get("media_type")):
+        from pydantic_ai import BinaryContent
+
+        return [
+            "Extract the structured facts from this document.",
+            BinaryContent(data=document["data"], media_type=document["media_type"]),
+        ]
+    max_chars = (version.params or {}).get("max_chars", 12000)
+    return text[:max_chars] or "(empty document)"
 
 
 def build_extraction_output_model(version):
@@ -137,11 +160,13 @@ def _extraction_system_prompt(version) -> str:
     return f"{version.prompt_text.strip()}\n\n{_PROVENANCE_INSTRUCTIONS}"
 
 
-def extract_facts(version, text: str, *, model=None) -> list[dict]:
+def extract_facts(version, text: str, *, model=None, document: dict | None = None) -> list[dict]:
     """Run the extractor agent; return facts as plain dicts ({data, provenance}).
 
-    Provenance validation/stamping happens in the pipeline (span resolution +
-    server-side fields); here we just get validated, snippet-bearing facts.
+    When ``document`` (``{"data": bytes, "media_type": str}``) is a PDF/image, the
+    ORIGINAL document is sent to the (multimodal) model instead of the flattened
+    markitdown text (#84). Provenance validation/stamping happens in the pipeline;
+    here we just get validated, snippet-bearing facts.
     """
     from pydantic_ai import Agent
 
@@ -153,6 +178,5 @@ def extract_facts(version, text: str, *, model=None) -> list[dict]:
         model_settings=_model_settings(version),
         retries=2,
     )
-    max_chars = (version.params or {}).get("max_chars", 12000)
-    result = agent.run_sync(text[:max_chars] or "(empty document)")
+    result = agent.run_sync(_extraction_input(version, text, document))
     return [f.model_dump() for f in result.output.facts]

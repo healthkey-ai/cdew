@@ -217,6 +217,10 @@ LLM_SEED = env.int("LLM_SEED", default=42)
 CLASSIFIER_SCORES_FN = env("CLASSIFIER_SCORES_FN", default="")
 # Same seam for extraction (apps.prompts.agents.extract_facts by default).
 EXTRACT_FACTS_FN = env("EXTRACT_FACTS_FN", default="")
+# Feed the ORIGINAL document (PDF/image) to the multimodal extractor instead of
+# markitdown's flattened text (#84) — markitdown scrambles table/gauge layouts and
+# detaches values from their rows. Off → text-only extraction.
+EXTRACT_MULTIMODAL = env.bool("EXTRACT_MULTIMODAL", default=True)
 
 # ── Document AI — geometry OCR for the review overlay (design §9, #66) ───────
 # Token bounding boxes + rendered page images (digital + scanned) from the

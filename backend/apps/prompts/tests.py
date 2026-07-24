@@ -86,3 +86,19 @@ class ExtractAgentTests(TestCase):
         for f in facts:
             assert "data" in f and "provenance" in f
             assert required_prov <= set(f["provenance"])
+
+    def test_extraction_input_sends_original_document_for_pdf(self):
+        # #84: a PDF/image is sent as BinaryContent (the model reads the true
+        # layout); text-only docs still send the flattened text string.
+        from pydantic_ai import BinaryContent
+
+        from apps.prompts.agents import _extraction_input, _is_multimodal_mime
+
+        version = SimpleNamespace(params={})
+        pdf = {"data": b"%PDF-1.4", "media_type": "application/pdf"}
+        built = _extraction_input(version, "scrambled text", pdf)
+        assert isinstance(built, list) and any(isinstance(p, BinaryContent) for p in built)
+        # no document → the text string
+        assert _extraction_input(version, "hello", None) == "hello"
+        assert _is_multimodal_mime("application/pdf") and _is_multimodal_mime("image/png")
+        assert not _is_multimodal_mime("text/plain")

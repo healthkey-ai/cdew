@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.utils.module_loading import import_string
 
 from apps.documents.models import ExtractionRecord, ExtractionStatus
-from apps.prompts.agents import extract_facts
+from apps.prompts.agents import _is_multimodal_mime, extract_facts
 from apps.prompts.resolve import resolve_extractors
 
 logger = logging.getLogger("apps.pipeline")
@@ -22,10 +22,30 @@ def _facts_fn():
     return import_string(path) if path else extract_facts
 
 
-def resolve_span(text: str, prov: dict):
+def _document_binary(doc) -> dict | None:
+    """The original document as ``{"data": bytes, "media_type": str}`` for
+    multimodal extraction (#84), or None if disabled / not a supported type /
+    unreadable. Feeding the PDF/image lets the model read the true layout instead
+    of markitdown's flattened text."""
+    if not getattr(settings, "EXTRACT_MULTIMODAL", True):
+        return None
+    if not _is_multimodal_mime(getattr(doc, "mime", None)):
+        return None
+    try:
+        with doc.file.open("rb") as fh:
+            return {"data": fh.read(), "media_type": doc.mime}
+    except Exception:
+        logger.warning("extract: could not read original document doc=%s", doc.id)
+        return None
+
+
+def resolve_span(text: str, prov: dict, *, trust_snippet: bool = False):
     """Return (char_start, char_end, ok). The verbatim snippet is authoritative:
     if it's found in the text we use its real offsets (LLMs often miscount);
-    otherwise we accept in-range given offsets; else the span is unresolvable."""
+    otherwise we accept in-range given offsets. When ``trust_snippet`` (the model
+    read the original PDF/image, not this text), a non-empty snippet grounds the
+    fact even if it isn't findable in the flattened text — char offsets then just
+    can't drive the text-view highlight (the bbox overlay does, #68)."""
     snippet = (prov.get("snippet") or "").strip()
     if snippet:
         idx = text.find(snippet)
@@ -34,15 +54,18 @@ def resolve_span(text: str, prov: dict):
     cs, ce = prov.get("char_start"), prov.get("char_end")
     if isinstance(cs, int) and isinstance(ce, int) and 0 <= cs <= ce <= len(text):
         return cs, ce, True
+    if trust_snippet and snippet:
+        return 0, 0, True
     return (cs if isinstance(cs, int) else 0), (ce if isinstance(ce, int) else 0), False
 
 
 def run_extractor(doc, definition, version, text: str, *, model=None) -> list[ExtractionRecord]:
-    raw = _facts_fn()(version, text, model=model)
+    document = _document_binary(doc)
+    raw = _facts_fn()(version, text, model=model, document=document)
     records = []
     for f in raw:
         prov_in = f.get("provenance", {}) or {}
-        cs, ce, ok = resolve_span(text, prov_in)
+        cs, ce, ok = resolve_span(text, prov_in, trust_snippet=document is not None)
         confidence = prov_in.get("confidence") or 0.0
         provenance = {
             "document_id": doc.id,
