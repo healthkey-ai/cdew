@@ -31,9 +31,10 @@ import re  # noqa: E402
 _LAB_RE = re.compile(r"([A-Za-z][A-Za-z ]+?)\s+([\d.]+)\s*([A-Za-z/%µ]+)")
 
 
-def canned_facts(version, text, *, model=None) -> list[dict]:
+def canned_facts(version, text, *, model=None, document=None) -> list[dict]:
     """Deterministic fact extraction for tests: regex labs, keyword genetics.
-    Emits real char offsets + snippets so span resolution succeeds."""
+    Emits real char offsets + snippets so span resolution succeeds. Accepts
+    ``document`` (the multimodal original, #84) for signature compatibility."""
     key = version.definition.key
     facts: list[dict] = []
     if key == "lab_report":

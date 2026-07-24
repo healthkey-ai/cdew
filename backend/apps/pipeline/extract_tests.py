@@ -27,6 +27,14 @@ class ResolveSpanTests(TestCase):
         _, _, ok = resolve_span("hello world", {"snippet": "NOPE", "char_start": 40, "char_end": 50})
         assert ok is False
 
+    def test_trust_snippet_grounds_when_not_in_flattened_text(self):
+        # Multimodal extract (#84): the model read the original PDF, so a snippet
+        # absent from the flattened text still grounds the fact (bbox drives review).
+        cs, ce, ok = resolve_span("scrambled text", {"snippet": "Estradiol 120", "char_start": 0, "char_end": 0}, trust_snippet=True)
+        assert ok is True and (cs, ce) == (0, 0)
+        # Without trust, the same fact is unresolvable → flagged.
+        assert resolve_span("scrambled text", {"snippet": "Estradiol 120"}, trust_snippet=False)[2] is False
+
 
 class ExtractDocumentTests(TestCase):
     def test_lab_records_staged_with_provenance(self):
@@ -44,7 +52,7 @@ class ExtractDocumentTests(TestCase):
 
     def test_spanless_fact_flagged(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL")
-        bogus = lambda version, text, *, model=None: [  # noqa: E731
+        bogus = lambda version, text, *, model=None, document=None: [  # noqa: E731
             {"data": {"test_name": "X", "value": 1, "unit": "u"},
              "provenance": {"snippet": "NOT_IN_DOC", "char_start": 9999, "char_end": 10000, "confidence": 0.4}}
         ]
@@ -53,6 +61,56 @@ class ExtractDocumentTests(TestCase):
             run_extractor(doc, lab, lab.active_version, doc.text.content)
         rec = doc.extractions.get()
         assert rec.status == ExtractionStatus.FLAGGED
+
+
+class MultimodalExtractTests(TestCase):
+    """#84: a PDF/image is fed to the extractor as the original document, and a
+    snippet the model read from it grounds the fact even if the flattened text
+    (markitdown) scrambled it away."""
+
+    def _pdf_doc(self, content_text: str):
+        from apps.documents.models import DocumentStatus, DocumentText
+
+        doc, _ = ingest_upload(
+            SimpleUploadedFile("r.pdf", b"%PDF-1.4 fake bytes", content_type="application/pdf"), "PDF1"
+        )
+        DocumentText.objects.create(document=doc, parser="markitdown", version="1", content=content_text)
+        doc.status = DocumentStatus.CLASSIFIED
+        doc.save(update_fields=["status"])
+        return doc
+
+    def test_original_pdf_passed_and_snippet_grounds_fact(self):
+        doc = self._pdf_doc("Estradiol\n\nProgesterone\n\n120\n\n5")  # markitdown scrambled it
+        seen = {}
+
+        def spy(version, text, *, model=None, document=None):
+            seen["document"] = document
+            return [{"data": {"test_name": "Estradiol", "value": 120, "unit": "pg/mL"},
+                     "provenance": {"snippet": "Estradiol 120 43-180 pg/mL", "char_start": 0, "char_end": 0, "confidence": 0.9}}]
+
+        lab = PromptDefinition.objects.get(key="lab_report")
+        with patch("apps.pipeline.extract._facts_fn", return_value=spy):
+            run_extractor(doc, lab, lab.active_version, doc.text.content)
+        # the original PDF bytes were handed to the extractor
+        assert seen["document"] is not None
+        assert seen["document"]["media_type"] == "application/pdf"
+        assert seen["document"]["data"].startswith(b"%PDF")
+        # and the fact is STAGED (grounded by the verbatim snippet), not flagged,
+        # even though "Estradiol 120 43-180 pg/mL" isn't contiguous in the text.
+        assert doc.extractions.get().status == ExtractionStatus.STAGED
+
+    def test_disabled_or_texty_doc_gets_no_document(self):
+        doc = _parsed(b"Hemoglobin 9.1 g/dL")  # text/plain → not multimodal
+        seen = {}
+
+        def spy(version, text, *, model=None, document=None):
+            seen["document"] = document
+            return []
+
+        lab = PromptDefinition.objects.get(key="lab_report")
+        with patch("apps.pipeline.extract._facts_fn", return_value=spy):
+            run_extractor(doc, lab, lab.active_version, doc.text.content)
+        assert seen["document"] is None
 
     def test_idempotent_reextract(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL\nSodium 140 mmol/L")
