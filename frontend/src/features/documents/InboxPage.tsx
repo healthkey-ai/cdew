@@ -42,19 +42,20 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** Colored uppercase status pill (matches the row-status affordance). */
+/** Colored uppercase status pill — the document's real lifecycle status. */
 function statusPill(d: SourceDocument): { label: string; className: string } {
   if (d.verified) return { label: "Verified", className: "bg-emerald-600 text-white" };
   switch (d.status) {
+    case "received":
+      return { label: "Received", className: "bg-slate-200 text-slate-700 dark:bg-slate-500/25 dark:text-slate-300" };
+    case "parsed":
+      return { label: "Parsed", className: "bg-blue-600 text-white" };
     case "needs_classification":
       return { label: "Needs classification", className: "bg-destructive text-white" };
     case "classified":
       return { label: "Classified", className: "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300" };
     case "parse_failed":
       return { label: "Parse failed", className: "bg-destructive/15 text-destructive" };
-    case "received":
-    case "parsed":
-      return { label: "Processing", className: "bg-blue-600 text-white" };
     default:
       return { label: statusLabel(d.status), className: "bg-muted text-muted-foreground" };
   }
@@ -65,6 +66,7 @@ function iconTint(d: SourceDocument): string {
   if (d.status === "needs_classification" || d.status === "parse_failed")
     return "bg-red-100 text-red-500 dark:bg-red-500/15 dark:text-red-400";
   if (d.status === "classified") return "bg-indigo-100 text-indigo-500 dark:bg-indigo-500/15 dark:text-indigo-400";
+  if (d.status === "received") return "bg-slate-100 text-slate-500 dark:bg-slate-500/15 dark:text-slate-400";
   return "bg-blue-100 text-blue-500 dark:bg-blue-500/15 dark:text-blue-400";
 }
 
