@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, QrCode, Trash2, UploadCloud } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, Trash2, UploadCloud } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -151,9 +151,6 @@ function UploadHero({ patientRef, setPatientRef }: { patientRef: string; setPati
       <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
         <Button onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
           {upload.isPending ? "Uploading…" : "Select File"}
-        </Button>
-        <Button variant="secondary" onClick={() => toast.info("QR scanning isn't available yet")}>
-          <QrCode /> Scan QR Code
         </Button>
       </div>
 
