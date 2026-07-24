@@ -230,7 +230,7 @@ export function InboxPage() {
         </div>
 
         {/* column headers */}
-        <div className="mt-4 grid grid-cols-[1fr_8rem_10rem_1fr_5rem] gap-3 border-b px-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="mt-4 grid grid-cols-[1fr_8rem_10rem_1fr_11.5rem] gap-3 border-b px-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           <span>Document Name &amp; ID</span>
           <span>Date Added</span>
           <span>Status</span>
@@ -253,7 +253,7 @@ export function InboxPage() {
               return (
                 <div
                   key={d.id}
-                  className="grid cursor-pointer grid-cols-[1fr_8rem_10rem_1fr_5rem] items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
+                  className="grid cursor-pointer grid-cols-[1fr_8rem_10rem_1fr_11.5rem] items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
                   onClick={() => navigate(`/inbox/${d.id}`)}
                 >
                   <div className="flex min-w-0 items-center gap-3">
@@ -277,26 +277,24 @@ export function InboxPage() {
                     </span>
                   </div>
                   <div className="truncate text-sm text-muted-foreground">{classificationText(d)}</div>
-                  <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                     <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-muted-foreground hover:text-foreground"
-                      aria-label={`View ${d.original_filename || `doc#${d.id}`}`}
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
                       onClick={() => navigate(`/inbox/${d.id}`)}
                     >
-                      <Eye className="size-4" />
+                      <Eye className="size-4" /> View
                     </Button>
                     {canDelete && (
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="size-8 text-muted-foreground hover:text-destructive"
-                        aria-label={`Delete ${d.original_filename || `doc#${d.id}`}`}
+                        size="sm"
+                        className="h-8 text-muted-foreground hover:text-destructive"
                         disabled={del.isPending}
                         onClick={() => onDelete(d)}
                       >
-                        <Trash2 className="size-4" />
+                        <Trash2 className="size-4" /> Delete
                       </Button>
                     )}
                   </div>
