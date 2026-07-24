@@ -4,7 +4,17 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, Trash2, UploadCloud } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMe } from "@/features/auth/api";
@@ -174,6 +184,7 @@ export function InboxPage() {
   const [patientRef, setPatientRef] = useState("PT-001");
   const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
+  const [toDelete, setToDelete] = useState<SourceDocument | null>(null);
 
   const docs = useDocuments(undefined, tab === "all" ? undefined : tab, page);
   const del = useDeleteDocument();
@@ -186,16 +197,16 @@ export function InboxPage() {
   const first = count === 0 ? 0 : (page - 1) * DOCUMENTS_PAGE_SIZE + 1;
   const last = (page - 1) * DOCUMENTS_PAGE_SIZE + rows.length;
 
-  const onDelete = (d: SourceDocument) => {
-    const label = d.original_filename || `doc#${d.id}`;
-    if (!window.confirm(`Delete “${label}”? This permanently removes the document and all its extractions.`)) return;
-    del.mutate(d.id, {
+  const confirmDelete = () => {
+    if (!toDelete) return;
+    del.mutate(toDelete.id, {
       onSuccess: () => toast.success("Document deleted"),
       onError: (err) => {
         const s = (err as { response?: { status?: number } }).response?.status;
         toast.error(s === 403 ? "You need the reviewer role to delete" : "Delete failed");
       },
     });
+    setToDelete(null);
   };
 
   return (
@@ -290,7 +301,7 @@ export function InboxPage() {
                         size="sm"
                         className="h-8 text-muted-foreground hover:text-destructive"
                         disabled={del.isPending}
-                        onClick={() => onDelete(d)}
+                        onClick={() => setToDelete(d)}
                       >
                         <Trash2 className="size-4" /> Delete
                       </Button>
@@ -355,6 +366,24 @@ export function InboxPage() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={toDelete !== null} onOpenChange={(open) => !open && setToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes “{toDelete?.original_filename || (toDelete ? `doc#${toDelete.id}` : "")}” and all
+              of its extractions. This can’t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className={buttonVariants({ variant: "destructive" })} onClick={confirmDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
