@@ -12,7 +12,7 @@ from collections import Counter
 from django.utils import timezone
 
 from .classify import _scores_fn, apply_taxonomy
-from .extract import _facts_fn, resolve_span
+from .extract import _document_binary, _facts_fn, resolve_span
 
 logger = logging.getLogger("apps.pipeline")
 
@@ -27,11 +27,11 @@ def _facts_equal(extracted_data: list, expected) -> bool:
     return Counter(map(key, extracted_data)) == Counter(map(key, expected or []))
 
 
-def _extractor_result(version, text):
+def _extractor_result(version, text, document=None):
     facts = []
-    for f in _facts_fn()(version, text):
+    for f in _facts_fn()(version, text, document=document):
         prov = f.get("provenance", {}) or {}
-        cs, ce, ok = resolve_span(text, prov)
+        cs, ce, ok = resolve_span(text, prov, trust_snippet=document is not None)
         facts.append({
             "data": f.get("data", {}),
             "snippet": prov.get("snippet", ""),
@@ -62,7 +62,9 @@ def dry_run_sample(version, s) -> dict:
     text = getattr(getattr(s.document, "text", None), "content", "") or ""
     row = {"sample_id": s.id, "label": s.label or f"doc {s.document_id}", "document_id": s.document_id}
     if kind == "extractor":
-        facts = _extractor_result(version, text)
+        # Extract from the ORIGINAL document (PDF/image) when available, matching
+        # the live pipeline (#84) — markitdown scrambles table/gauge layouts.
+        facts = _extractor_result(version, text, document=_document_binary(getattr(s, "document", None)))
         row["facts"] = facts
         s.extracted_payload = facts
         if s.expected_payload is not None:

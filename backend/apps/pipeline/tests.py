@@ -107,6 +107,30 @@ class LlmTaskTests(TestCase):
         sample.refresh_from_db()
         assert sample.extracted_payload is not None and sample.extracted_version_id == lab.active_version_id
 
+    def test_dry_run_extracts_from_original_pdf(self):
+        # #84: a PDF test sample is extracted from the original document, and a
+        # snippet the model read from it grounds the fact (resolved) even though
+        # it isn't contiguous in the flattened text.
+        from apps.documents.models import DocumentText
+        from apps.pipeline.dryrun import dry_run_sample
+        from apps.prompts.models import PromptDefinition, PromptTestSample
+
+        lab = PromptDefinition.objects.get(key="lab_report")
+        doc, _ = ingest_upload(SimpleUploadedFile("r.pdf", b"%PDF-1.4 x", content_type="application/pdf"), "DR")
+        DocumentText.objects.create(document=doc, parser="markitdown", version="1", content="Estradiol\n\n120")
+        sample = PromptTestSample.objects.create(definition=lab, document=doc)
+        seen = {}
+
+        def spy(version, text, *, model=None, document=None):
+            seen["document"] = document
+            return [{"data": {"test_name": "Estradiol", "value": 120, "unit": "pg/mL"},
+                     "provenance": {"snippet": "Estradiol 120 43-180 pg/mL", "char_start": 0, "char_end": 0, "confidence": 0.9}}]
+
+        with patch("apps.pipeline.dryrun._facts_fn", return_value=spy):
+            row = dry_run_sample(lab.active_version, sample)
+        assert seen["document"] is not None and seen["document"]["media_type"] == "application/pdf"
+        assert row["facts"][0]["resolved"] is True  # grounded by snippet, not char-offset
+
 
 class PipelineServiceTests(TestCase):
     def test_upload_stops_at_needs_classification_by_default(self):
