@@ -145,7 +145,8 @@ function UploadHero({ patientRef, setPatientRef }: { patientRef: string; setPati
       </div>
       <h2 className="mt-4 text-lg font-semibold">Upload Source Documents</h2>
       <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-        Drag and drop patient charts, lab results, or imaging reports here. Supports PDF, HL7, and DICOM formats.
+        Drag and drop patient charts, lab results, imaging reports, or office visit notes here. Supports PDF, HL7,
+        and DICOM formats.
       </p>
 
       <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
