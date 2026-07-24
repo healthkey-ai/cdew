@@ -51,6 +51,19 @@ class DocumentUploadTests(APITestCase):
         assert "Hemoglobin" in t.json()["content"]
         assert t.json()["pages"][0]["char_end"] == t.json()["char_len"]
 
+    def test_file_endpoint_streams_original(self):
+        r = self._upload("orig.txt", b"raw original bytes", "text/plain")
+        doc_id = r.json()["id"]
+        f = self.client.get(f"/api/v1/documents/{doc_id}/file/")
+        assert f.status_code == 200
+        assert f["Content-Type"].startswith("text/plain")
+        assert b"".join(f.streaming_content) == b"raw original bytes"
+
+    def test_file_endpoint_requires_auth(self):
+        doc_id = self._upload("orig.txt", b"x", "text/plain").json()["id"]
+        self.client.credentials()  # drop token
+        assert self.client.get(f"/api/v1/documents/{doc_id}/file/").status_code == 401
+
     def test_xlsx_upload_parses_cells(self):
         r = self._upload(
             "sheet.xlsx", _xlsx_bytes(),

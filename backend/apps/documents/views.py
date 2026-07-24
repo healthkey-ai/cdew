@@ -150,6 +150,19 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             return Response({"detail": "no image for this page."}, status=status.HTTP_404_NOT_FOUND)
         return FileResponse(default_storage.open(pg["image_path"], "rb"), content_type=pg.get("image_mime") or "image/png")
 
+    @action(detail=True, methods=["get"])
+    def file(self, request, pk=None):
+        """Stream the original uploaded document (PDF/image/etc.) for inline preview.
+        Same access level as the parsed `text` (authenticated); PHI stays behind auth."""
+        from django.http import FileResponse
+
+        doc = self.get_object()
+        if not doc.file:
+            return Response({"detail": "no original file."}, status=status.HTTP_404_NOT_FOUND)
+        resp = FileResponse(doc.file.open("rb"), content_type=doc.mime or "application/octet-stream")
+        resp["Content-Disposition"] = f'inline; filename="{doc.original_filename or f"doc-{doc.id}"}"'
+        return resp
+
     @action(detail=True, methods=["post"])
     def verify(self, request, pk=None):
         """Mark a document verified (design §6). Gated: every fact must be resolved
