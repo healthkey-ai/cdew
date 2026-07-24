@@ -59,13 +59,16 @@ interface Paginated<T> {
   results: T[];
 }
 
-export function useDocuments(patientRef?: string, status?: string) {
+export const DOCUMENTS_PAGE_SIZE = 50; // DRF PAGE_SIZE (settings/base.py)
+
+export function useDocuments(patientRef?: string, status?: string, page?: number) {
   return useQuery({
-    queryKey: KEYS.documents(patientRef, status),
+    queryKey: [...KEYS.documents(patientRef, status), page ?? 1],
     queryFn: async () => {
       const params: Record<string, string> = {};
       if (patientRef) params.patient_ref = patientRef;
       if (status) params.status = status;
+      if (page && page > 1) params.page = String(page);
       return (await api.get<Paginated<SourceDocument>>("/documents/", { params })).data;
     },
   });
