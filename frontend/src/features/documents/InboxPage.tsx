@@ -20,8 +20,24 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useMe } from "@/features/auth/api";
 import { useJob } from "@/features/pipeline/api";
 import { cn } from "@/lib/utils";
-import { DOCUMENTS_PAGE_SIZE, type SourceDocument, useDeleteDocument, useDocuments, useUploadDocument } from "./api";
+import {
+  DOCUMENTS_PAGE_SIZE,
+  isDocProcessing,
+  type SourceDocument,
+  useDeleteDocument,
+  useDocuments,
+  useUploadDocument,
+} from "./api";
 import { statusLabel } from "./status";
+
+/** Live pipeline-stage label while a job is running (design §4 stages). */
+const STAGE_LABELS: Record<string, string> = {
+  ingest: "Ingesting…",
+  parse: "Parsing…",
+  classify: "Classifying…",
+  extract: "Extracting…",
+  done: "Finishing…",
+};
 
 const TABS = [
   { value: "all", label: "All Documents" },
@@ -278,14 +294,21 @@ export function InboxPage() {
                   </div>
                   <div className="text-sm text-muted-foreground">{timeAgo(d.created_at)}</div>
                   <div>
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                        pill.className,
-                      )}
-                    >
-                      {pill.label}
-                    </span>
+                    {isDocProcessing(d) ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                        <Loader2 className="size-3 animate-spin" />
+                        {STAGE_LABELS[d.job?.stage ?? ""] ?? "Processing…"}
+                      </span>
+                    ) : (
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                          pill.className,
+                        )}
+                      >
+                        {pill.label}
+                      </span>
+                    )}
                   </div>
                   <div className="truncate text-sm text-muted-foreground">{classificationText(d)}</div>
                   <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>

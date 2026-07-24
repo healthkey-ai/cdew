@@ -59,6 +59,12 @@ class DocumentUploadTests(APITestCase):
         assert f["Content-Type"].startswith("text/plain")
         assert b"".join(f.streaming_content) == b"raw original bytes"
 
+    def test_list_includes_latest_job_stage(self):
+        self._upload("j.txt", b"Hemoglobin 9.1 g/dL", "text/plain")
+        results = self.client.get("/api/v1/documents/").json()["results"]
+        job = results[0]["job"]
+        assert job is not None and "status" in job and "stage" in job
+
     def test_file_endpoint_requires_auth(self):
         doc_id = self._upload("orig.txt", b"x", "text/plain").json()["id"]
         self.client.credentials()  # drop token

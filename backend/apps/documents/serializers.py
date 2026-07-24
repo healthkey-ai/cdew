@@ -24,13 +24,14 @@ class DocumentGeometrySerializer(serializers.ModelSerializer):
 class SourceDocumentSerializer(serializers.ModelSerializer):
     has_text = serializers.SerializerMethodField()
     classification = serializers.SerializerMethodField()
+    job = serializers.SerializerMethodField()
 
     class Meta:
         model = SourceDocument
         fields = (
             "id", "patient_ref", "origin", "original_filename", "mime", "sha256",
             "byte_size", "status", "created_at", "has_text", "classification",
-            "category", "verified", "verified_at",
+            "category", "verified", "verified_at", "job",
         )
         read_only_fields = fields
 
@@ -38,6 +39,14 @@ class SourceDocumentSerializer(serializers.ModelSerializer):
 
     def get_verified(self, obj) -> bool:
         return obj.verified_at is not None
+
+    def get_job(self, obj):
+        """Latest pipeline job's live status/stage for the row (annotated in the
+        viewset's queryset to avoid N+1). None if the document has no job."""
+        status = getattr(obj, "job_status", None)
+        if not status:
+            return None
+        return {"status": status, "stage": getattr(obj, "job_stage", None)}
 
     def get_has_text(self, obj) -> bool:
         return hasattr(obj, "text")

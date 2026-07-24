@@ -44,7 +44,20 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         instance.delete()
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related("classification", "text")
+        from django.db.models import OuterRef, Subquery
+
+        from apps.pipeline.models import ExtractionJob
+
+        latest = ExtractionJob.objects.filter(document=OuterRef("pk")).order_by("-created_at")
+        qs = (
+            super()
+            .get_queryset()
+            .select_related("classification", "text")
+            .annotate(
+                job_status=Subquery(latest.values("status")[:1]),
+                job_stage=Subquery(latest.values("stage")[:1]),
+            )
+        )
         patient = self.request.query_params.get("patient_ref")
         if patient:
             qs = qs.filter(patient_ref=patient)

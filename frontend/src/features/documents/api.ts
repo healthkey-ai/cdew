@@ -20,6 +20,12 @@ export interface SourceDocument {
   verified_at: string | null;
   deduplicated?: boolean;
   job_id?: number | null;
+  job?: { status: string; stage: string } | null; // latest pipeline job (live)
+}
+
+/** Is the document's pipeline job actively running? */
+export function isDocProcessing(d: SourceDocument): boolean {
+  return d.job?.status === "queued" || d.job?.status === "running";
 }
 
 export interface DocumentText {
@@ -71,6 +77,9 @@ export function useDocuments(patientRef?: string, status?: string, page?: number
       if (page && page > 1) params.page = String(page);
       return (await api.get<Paginated<SourceDocument>>("/documents/", { params })).data;
     },
+    // Poll while any document on the page is still being processed.
+    refetchInterval: (q: { state: { data?: Paginated<SourceDocument> } }) =>
+      (q.state.data?.results ?? []).some(isDocProcessing) ? 1500 : false,
   });
 }
 
