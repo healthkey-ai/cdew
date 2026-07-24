@@ -2,16 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, MoreVertical, QrCode, Trash2, UploadCloud } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, QrCode, Trash2, UploadCloud } from "lucide-react";
 
-import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMe } from "@/features/auth/api";
@@ -237,7 +230,7 @@ export function InboxPage() {
         </div>
 
         {/* column headers */}
-        <div className="mt-4 grid grid-cols-[1fr_8rem_10rem_1fr_3rem] gap-3 border-b px-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="mt-4 grid grid-cols-[1fr_8rem_10rem_1fr_5rem] gap-3 border-b px-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           <span>Document Name &amp; ID</span>
           <span>Date Added</span>
           <span>Status</span>
@@ -260,7 +253,7 @@ export function InboxPage() {
               return (
                 <div
                   key={d.id}
-                  className="grid cursor-pointer grid-cols-[1fr_8rem_10rem_1fr_3rem] items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
+                  className="grid cursor-pointer grid-cols-[1fr_8rem_10rem_1fr_5rem] items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
                   onClick={() => navigate(`/inbox/${d.id}`)}
                 >
                   <div className="flex min-w-0 items-center gap-3">
@@ -284,28 +277,28 @@ export function InboxPage() {
                     </span>
                   </div>
                   <div className="truncate text-sm text-muted-foreground">{classificationText(d)}</div>
-                  <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        aria-label="Actions"
-                        className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "size-8 text-muted-foreground")}
+                  <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-muted-foreground hover:text-foreground"
+                      aria-label={`View ${d.original_filename || `doc#${d.id}`}`}
+                      onClick={() => navigate(`/inbox/${d.id}`)}
+                    >
+                      <Eye className="size-4" />
+                    </Button>
+                    {canDelete && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 text-muted-foreground hover:text-destructive"
+                        aria-label={`Delete ${d.original_filename || `doc#${d.id}`}`}
+                        disabled={del.isPending}
+                        onClick={() => onDelete(d)}
                       >
-                        <MoreVertical className="size-4" />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent>
-                        <DropdownMenuItem onClick={() => navigate(`/inbox/${d.id}`)}>
-                          <Eye className="size-4" /> View
-                        </DropdownMenuItem>
-                        {canDelete && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem variant="destructive" disabled={del.isPending} onClick={() => onDelete(d)}>
-                              <Trash2 className="size-4" /> Delete
-                            </DropdownMenuItem>
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                        <Trash2 className="size-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
