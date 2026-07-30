@@ -161,7 +161,7 @@ function DocumentImageView({
     );
   }
   return (
-    <div className="max-h-[80vh] space-y-3 overflow-auto">
+    <div className="min-h-0 flex-1 space-y-3 overflow-auto">
       {geometry.pages.map((p) => (
         <PageOverlay key={p.page} docId={docId} page={p.page} facts={facts} active={active} onPick={onPick} />
       ))}
@@ -381,10 +381,10 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
         </Button>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
+        <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-14rem)] lg:grid-cols-[360px_1fr]">
           {/* left: facts as editable form cards + verify + add-a-fact */}
-          <div className="space-y-3">
-            <ul className="space-y-2">
+          <div className="flex min-h-0 flex-col gap-3">
+            <ul className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
               {facts.data?.map((f) => (
                 <FactCard
                   key={f.id}
@@ -420,7 +420,7 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
               )}
             </ul>
 
-            <div className="flex items-center gap-2 border-t pt-3">
+            <div className="flex shrink-0 items-center gap-2 border-t pt-3">
               <Select value={category} onValueChange={(v) => setCategory(v ?? "labs")}>
                 <SelectTrigger className="w-36">
                   <SelectValue />
@@ -436,7 +436,7 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
               <Button onClick={onVerify}>Verify</Button>
             </div>
 
-            <div className="space-y-2 rounded-md border p-3">
+            <div className="shrink-0 space-y-2 rounded-md border p-3">
               <Label>Add a fact</Label>
               <Input
                 value={newSnippet}
@@ -472,8 +472,8 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
           </div>
 
           {/* right: document — image with bbox overlays (default) or parsed text */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-1">
+          <div className="flex min-h-0 flex-col gap-2">
+            <div className="flex shrink-0 items-center gap-1">
               <Button
                 variant={docView === "image" ? "secondary" : "ghost"}
                 size="sm"
@@ -503,7 +503,7 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
                 onPick={setActive}
               />
             ) : (
-              <pre className="max-h-[80vh] overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-relaxed">
+              <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-relaxed">
                 {Array.isArray(highlighted) ? (
                   <>
                     {highlighted[0]}
