@@ -20,6 +20,12 @@ export interface SourceDocument {
   verified_at: string | null;
   deduplicated?: boolean;
   job_id?: number | null;
+  job?: { status: string; stage: string } | null; // latest pipeline job (live)
+}
+
+/** Is the document's pipeline job actively running? */
+export function isDocProcessing(d: SourceDocument): boolean {
+  return d.job?.status === "queued" || d.job?.status === "running";
 }
 
 export interface DocumentText {
@@ -59,15 +65,21 @@ interface Paginated<T> {
   results: T[];
 }
 
-export function useDocuments(patientRef?: string, status?: string) {
+export const DOCUMENTS_PAGE_SIZE = 50; // DRF PAGE_SIZE (settings/base.py)
+
+export function useDocuments(patientRef?: string, status?: string, page?: number) {
   return useQuery({
-    queryKey: KEYS.documents(patientRef, status),
+    queryKey: [...KEYS.documents(patientRef, status), page ?? 1],
     queryFn: async () => {
       const params: Record<string, string> = {};
       if (patientRef) params.patient_ref = patientRef;
       if (status) params.status = status;
+      if (page && page > 1) params.page = String(page);
       return (await api.get<Paginated<SourceDocument>>("/documents/", { params })).data;
     },
+    // Poll while any document on the page is still being processed.
+    refetchInterval: (q: { state: { data?: Paginated<SourceDocument> } }) =>
+      (q.state.data?.results ?? []).some(isDocProcessing) ? 1500 : false,
   });
 }
 

@@ -1,56 +1,120 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Eye, Loader2, Trash2, Upload } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, Trash2, UploadCloud } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useMe } from "@/features/auth/api";
 import { useJob } from "@/features/pipeline/api";
 import { cn } from "@/lib/utils";
-import { type SourceDocument } from "./api";
-import { useDeleteDocument, useDocuments, useUploadDocument } from "./api";
-import { statusLabel, statusVariant } from "./status";
+import {
+  DOCUMENTS_PAGE_SIZE,
+  isDocProcessing,
+  type SourceDocument,
+  useDeleteDocument,
+  useDocuments,
+  useUploadDocument,
+} from "./api";
+import { statusLabel } from "./status";
 
-const STATUS_FILTERS = [
-  { value: "all", label: "All statuses" },
-  { value: "needs_classification", label: "Needs classification" },
-  { value: "classified", label: "Classified" },
-  { value: "parse_failed", label: "Parse failed" },
+/** Live pipeline-stage label while a job is running (design §4 stages). */
+const STAGE_LABELS: Record<string, string> = {
+  ingest: "Ingesting…",
+  parse: "Parsing…",
+  classify: "Classifying…",
+  extract: "Extracting…",
+  done: "Finishing…",
+};
+
+const TABS = [
+  { value: "all", label: "All Documents" },
+  { value: "needs_classification", label: "Needs Classification" },
+  { value: "classified", label: "Ready for Review" },
+  { value: "parse_failed", label: "Parse Failed" },
 ];
 
-function classificationText(d: SourceDocument) {
-  if (!d.classification) return "—";
-  return d.classification.outcome === "routed"
-    ? d.classification.routed_types.join(", ")
-    : `unclassified · ${d.classification.reason}`;
+function timeAgo(iso: string): string {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s} sec${s === 1 ? "" : "s"} ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min${m === 1 ? "" : "s"} ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? "" : "s"} ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d} day${d === 1 ? "" : "s"} ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
-/** Inbox queue (design §3): upload a document, poll the job, browse the queue,
- * and open a document on its own view page (parsed document + facts). */
-export function InboxPage() {
-  const qc = useQueryClient();
-  const [patientRef, setPatientRef] = useState("PT-001");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [jobId, setJobId] = useState<number | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+/** Colored uppercase status pill — the document's real lifecycle status. */
+function statusPill(d: SourceDocument): { label: string; className: string } {
+  if (d.verified) return { label: "Verified", className: "bg-emerald-600 text-white" };
+  switch (d.status) {
+    case "received":
+      return { label: "Received", className: "bg-slate-200 text-slate-700 dark:bg-slate-500/25 dark:text-slate-300" };
+    case "parsed":
+      return { label: "Parsed", className: "bg-blue-600 text-white" };
+    case "needs_classification":
+      return { label: "Needs classification", className: "bg-destructive text-white" };
+    case "classified":
+      return { label: "Ready for review", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" };
+    case "parse_failed":
+      return { label: "Parse failed", className: "bg-destructive/15 text-destructive" };
+    default:
+      return { label: statusLabel(d.status), className: "bg-muted text-muted-foreground" };
+  }
+}
 
-  const docs = useDocuments(patientRef || undefined, statusFilter === "all" ? undefined : statusFilter);
+function iconTint(d: SourceDocument): string {
+  if (d.verified) return "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400";
+  if (d.status === "needs_classification" || d.status === "parse_failed")
+    return "bg-red-100 text-red-500 dark:bg-red-500/15 dark:text-red-400";
+  if (d.status === "classified") return "bg-emerald-100 text-emerald-500 dark:bg-emerald-500/15 dark:text-emerald-400";
+  if (d.status === "received") return "bg-slate-100 text-slate-500 dark:bg-slate-500/15 dark:text-slate-400";
+  return "bg-blue-100 text-blue-500 dark:bg-blue-500/15 dark:text-blue-400";
+}
+
+function classificationText(d: SourceDocument): string {
+  if (!d.classification) return d.status === "needs_classification" ? "Pending Review" : "—";
+  return d.classification.outcome === "routed"
+    ? d.classification.routed_types.join(", ")
+    : `Unclassified · ${d.classification.reason}`;
+}
+
+function buildPages(cur: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: (number | "…")[] = [1];
+  const l = Math.max(2, cur - 1);
+  const r = Math.min(total - 1, cur + 1);
+  if (l > 2) pages.push("…");
+  for (let i = l; i <= r; i++) pages.push(i);
+  if (r < total - 1) pages.push("…");
+  pages.push(total);
+  return pages;
+}
+
+/** Drop-zone hero: drag-and-drop or pick a file, tagged with a patient ref. */
+function UploadHero({ patientRef, setPatientRef }: { patientRef: string; setPatientRef: (v: string) => void }) {
+  const qc = useQueryClient();
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const upload = useUploadDocument();
-  const del = useDeleteDocument();
   const job = useJob(jobId);
   const jobStatus = job.data?.status;
 
-  const me = useMe();
-  const canDelete = (me.data?.roles ?? []).some((r) => r === "reviewer" || r === "admin");
-
-  // Refresh the queue + notify when the job reaches a terminal state.
   useEffect(() => {
     if (jobStatus === "completed") {
       qc.invalidateQueries({ queryKey: ["documents"] });
@@ -61,172 +125,290 @@ export function InboxPage() {
     }
   }, [jobStatus, qc]);
 
-  const onUpload = (e: React.FormEvent) => {
-    e.preventDefault();
-    const file = fileRef.current?.files?.[0];
-    if (!file || !patientRef) {
-      toast.error("Pick a file and a patient_ref first");
+  const doUpload = (file?: File | null) => {
+    if (!file) return;
+    if (!patientRef.trim()) {
+      toast.error("Enter a patient ref first");
       return;
     }
     upload.mutate(
-      { file, patientRef },
+      { file, patientRef: patientRef.trim() },
       {
         onSuccess: (d) => {
           setJobId(d.job_id ?? null);
           if (fileRef.current) fileRef.current.value = "";
           toast.info(d.deduplicated ? "Deduplicated to existing document" : "Uploaded — processing…");
+          qc.invalidateQueries({ queryKey: ["documents"] });
         },
         onError: () => toast.error("Upload failed"),
       },
     );
   };
 
-  const onDelete = (d: SourceDocument) => {
-    const label = d.original_filename || `doc#${d.id}`;
-    if (!window.confirm(`Delete “${label}”? This permanently removes the document and all its extractions.`)) {
-      return;
-    }
-    del.mutate(d.id, {
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        doUpload(e.dataTransfer.files?.[0]);
+      }}
+      className={cn(
+        "rounded-xl border-2 border-dashed p-8 text-center transition-colors",
+        dragging ? "border-primary bg-primary/5" : "border-border bg-muted/30",
+      )}
+    >
+      <input
+        ref={fileRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => doUpload(e.target.files?.[0])}
+      />
+      <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+        {upload.isPending ? <Loader2 className="size-7 animate-spin" /> : <UploadCloud className="size-7" />}
+      </div>
+      <h2 className="mt-4 text-lg font-semibold">Upload Source Documents</h2>
+      <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+        Drag and drop patient charts, lab results, imaging reports, or office visit notes here. Supports PDF, HL7,
+        and DICOM formats.
+      </p>
+
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+        <Button onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
+          {upload.isPending ? "Uploading…" : "Select File"}
+        </Button>
+      </div>
+
+      <div className="mx-auto mt-4 flex max-w-xs items-center justify-center gap-2">
+        <span className="text-xs text-muted-foreground">Patient ref</span>
+        <Input
+          className="h-8 w-40 bg-background"
+          value={patientRef}
+          onChange={(e) => setPatientRef(e.target.value)}
+          placeholder="PT-001"
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Inbox (design §3): upload a document, browse recent activity, open one to review. */
+export function InboxPage() {
+  const navigate = useNavigate();
+  const [patientRef, setPatientRef] = useState("PT-001");
+  const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
+  const [toDelete, setToDelete] = useState<SourceDocument | null>(null);
+
+  const docs = useDocuments(undefined, tab === "all" ? undefined : tab, page);
+  const del = useDeleteDocument();
+  const me = useMe();
+  const canDelete = (me.data?.roles ?? []).some((r) => r === "reviewer" || r === "admin");
+
+  const rows = docs.data?.results ?? [];
+  const count = docs.data?.count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(count / DOCUMENTS_PAGE_SIZE));
+  const first = count === 0 ? 0 : (page - 1) * DOCUMENTS_PAGE_SIZE + 1;
+  const last = (page - 1) * DOCUMENTS_PAGE_SIZE + rows.length;
+
+  const confirmDelete = () => {
+    if (!toDelete) return;
+    del.mutate(toDelete.id, {
       onSuccess: () => toast.success("Document deleted"),
       onError: (err) => {
         const s = (err as { response?: { status?: number } }).response?.status;
         toast.error(s === 403 ? "You need the reviewer role to delete" : "Delete failed");
       },
     });
+    setToDelete(null);
   };
 
-  const rows = docs.data?.results ?? [];
-
   return (
-    <section className="space-y-6">
+    <section className="space-y-8">
+      <UploadHero patientRef={patientRef} setPatientRef={setPatientRef} />
+
+      {/* Recent activity */}
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Inbox</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Upload clinical documents; each is ingested and parsed, then lands in the{" "}
-          <span className="font-medium">Needs classification</span> queue for a reviewer to classify.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold tracking-tight">Recent Activity</h2>
+          <div className="inline-flex items-center gap-1 rounded-lg bg-muted p-1 text-sm">
+            {TABS.map((t) => (
+              <button
+                key={t.value}
+                onClick={() => {
+                  setTab(t.value);
+                  setPage(1);
+                }}
+                className={cn(
+                  "rounded-md px-3 py-1.5 font-medium transition-colors",
+                  tab === t.value
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* column headers */}
+        <div className="mt-4 grid grid-cols-[1fr_8rem_10rem_1fr_11.5rem] gap-3 border-b px-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span>Document Name &amp; ID</span>
+          <span>Date Added</span>
+          <span>Status</span>
+          <span>Classification</span>
+          <span className="text-right">Action</span>
+        </div>
+
+        <div className="mt-3 space-y-3">
+          {docs.isPending &&
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 rounded-lg border bg-card p-3">
+                <Skeleton className="size-10 rounded-lg" />
+                <Skeleton className="h-4 w-56" />
+              </div>
+            ))}
+
+          {!docs.isPending &&
+            rows.map((d) => {
+              const pill = statusPill(d);
+              return (
+                <div
+                  key={d.id}
+                  className="grid cursor-pointer grid-cols-[1fr_8rem_10rem_1fr_11.5rem] items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
+                  onClick={() => navigate(`/inbox/${d.id}`)}
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg", iconTint(d))}>
+                      <FileText className="size-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{d.original_filename || `doc#${d.id}`}</div>
+                      <div className="font-mono text-xs text-muted-foreground">{d.patient_ref}</div>
+                    </div>
+                  </div>
+                  <div className="text-sm text-muted-foreground">{timeAgo(d.created_at)}</div>
+                  <div>
+                    {isDocProcessing(d) ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                        <Loader2 className="size-3 animate-spin" />
+                        {STAGE_LABELS[d.job?.stage ?? ""] ?? "Processing…"}
+                      </span>
+                    ) : (
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                          pill.className,
+                        )}
+                      >
+                        {pill.label}
+                      </span>
+                    )}
+                  </div>
+                  <div className="truncate text-sm text-muted-foreground">{classificationText(d)}</div>
+                  <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => navigate(`/inbox/${d.id}`)}
+                    >
+                      <Eye className="size-4" /> View
+                    </Button>
+                    {canDelete && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-muted-foreground hover:text-destructive"
+                        disabled={del.isPending}
+                        onClick={() => setToDelete(d)}
+                      >
+                        <Trash2 className="size-4" /> Delete
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+          {!docs.isPending && rows.length === 0 && (
+            <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
+              No documents in this queue yet.
+            </div>
+          )}
+        </div>
+
+        {/* pagination */}
+        {count > 0 && (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm">
+            <span className="text-muted-foreground">
+              Showing {first}–{last} of {count} document{count === 1 ? "" : "s"}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="size-4" />
+              </Button>
+              {buildPages(page, totalPages).map((p, i) =>
+                p === "…" ? (
+                  <span key={`e${i}`} className="px-2 text-muted-foreground">
+                    …
+                  </span>
+                ) : (
+                  <Button
+                    key={p}
+                    variant={p === page ? "default" : "outline"}
+                    size="icon"
+                    className="size-8"
+                    onClick={() => setPage(p)}
+                  >
+                    {p}
+                  </Button>
+                ),
+              )}
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                aria-label="Next page"
+              >
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* upload */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Upload</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onUpload} className="flex flex-wrap items-center gap-2">
-            <Input
-              className="h-9 w-40"
-              value={patientRef}
-              onChange={(e) => setPatientRef(e.target.value)}
-              placeholder="patient_ref"
-            />
-            <Input ref={fileRef} type="file" className="h-9 w-auto py-1.5" />
-            <Button type="submit" disabled={upload.isPending}>
-              {upload.isPending ? <Loader2 className="animate-spin" /> : <Upload />}
-              {upload.isPending ? "Uploading…" : "Upload"}
-            </Button>
-            {job.data && jobId != null && (
-              <Badge variant="outline" className="font-normal">
-                job · {job.data.stage}/{job.data.status}
-              </Badge>
-            )}
-          </form>
-        </CardContent>
-      </Card>
-
-      {/* queue */}
-      <Card>
-        <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
-          <CardTitle>Queue</CardTitle>
-          <div className="flex items-center gap-2">
-            <Input
-              className="h-8 w-36"
-              value={patientRef}
-              onChange={(e) => setPatientRef(e.target.value)}
-              placeholder="filter patient_ref"
-            />
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
-              <SelectTrigger className="h-8 w-48">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_FILTERS.map((f) => (
-                  <SelectItem key={f.value} value={f.value}>
-                    {f.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>File</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Classification</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {docs.isPending &&
-                Array.from({ length: 3 }).map((_, i) => (
-                  <TableRow key={i}>
-                    {Array.from({ length: 4 }).map((__, j) => (
-                      <TableCell key={j}>
-                        <Skeleton className="h-4 w-24" />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              {rows.map((d) => (
-                <TableRow key={d.id}>
-                  <TableCell className="font-medium">
-                    <Link to={`/inbox/${d.id}`} className="text-primary hover:underline">
-                      {d.original_filename || `doc#${d.id}`}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      <Badge variant={statusVariant(d.status)}>{statusLabel(d.status)}</Badge>
-                      {d.verified && <Badge variant="secondary">✓ verified</Badge>}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{classificationText(d)}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Link to={`/inbox/${d.id}`} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
-                        <Eye />
-                        view
-                      </Link>
-                      {canDelete && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-muted-foreground hover:text-destructive"
-                          aria-label={`Delete ${d.original_filename || `doc#${d.id}`}`}
-                          disabled={del.isPending}
-                          onClick={() => onDelete(d)}
-                        >
-                          <Trash2 />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!docs.isPending && rows.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                    No documents match this filter.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <AlertDialog open={toDelete !== null} onOpenChange={(open) => !open && setToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes “{toDelete?.original_filename || (toDelete ? `doc#${toDelete.id}` : "")}” and all
+              of its extractions. This can’t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className={buttonVariants({ variant: "destructive" })} onClick={confirmDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

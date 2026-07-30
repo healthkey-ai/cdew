@@ -44,7 +44,20 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         instance.delete()
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related("classification", "text")
+        from django.db.models import OuterRef, Subquery
+
+        from apps.pipeline.models import ExtractionJob
+
+        latest = ExtractionJob.objects.filter(document=OuterRef("pk")).order_by("-created_at")
+        qs = (
+            super()
+            .get_queryset()
+            .select_related("classification", "text")
+            .annotate(
+                job_status=Subquery(latest.values("status")[:1]),
+                job_stage=Subquery(latest.values("stage")[:1]),
+            )
+        )
         patient = self.request.query_params.get("patient_ref")
         if patient:
             qs = qs.filter(patient_ref=patient)
@@ -149,6 +162,19 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         if not pg or not pg.get("image_path") or not default_storage.exists(pg["image_path"]):
             return Response({"detail": "no image for this page."}, status=status.HTTP_404_NOT_FOUND)
         return FileResponse(default_storage.open(pg["image_path"], "rb"), content_type=pg.get("image_mime") or "image/png")
+
+    @action(detail=True, methods=["get"])
+    def file(self, request, pk=None):
+        """Stream the original uploaded document (PDF/image/etc.) for inline preview.
+        Same access level as the parsed `text` (authenticated); PHI stays behind auth."""
+        from django.http import FileResponse
+
+        doc = self.get_object()
+        if not doc.file:
+            return Response({"detail": "no original file."}, status=status.HTTP_404_NOT_FOUND)
+        resp = FileResponse(doc.file.open("rb"), content_type=doc.mime or "application/octet-stream")
+        resp["Content-Disposition"] = f'inline; filename="{doc.original_filename or f"doc-{doc.id}"}"'
+        return resp
 
     @action(detail=True, methods=["post"])
     def verify(self, request, pk=None):
