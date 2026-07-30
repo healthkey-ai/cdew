@@ -448,8 +448,8 @@ export function ReviewPanel({ docId }: { docId: number }) {
   };
 
   return (
-    <Card>
-      <CardContent>
+    <Card className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+      <CardContent className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="truncate text-base font-semibold tracking-tight">
             Reviewing · <span className="font-normal text-muted-foreground">{name}</span>
@@ -466,7 +466,7 @@ export function ReviewPanel({ docId }: { docId: number }) {
             {verified ? "Verified" : "Verify"}
           </Button>
         </div>
-        <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-15rem)] lg:grid-cols-[360px_1fr]">
+        <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[360px_1fr]">
           {/* left: facts as editable form cards + verify */}
           <div className="flex min-h-0 flex-col gap-3">
             <div className="flex shrink-0 items-center justify-between">
