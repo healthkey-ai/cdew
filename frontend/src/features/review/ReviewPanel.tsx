@@ -125,12 +125,12 @@ function PageOverlay({
               width={Math.max(0, r[2] - r[0]) + pad * 2}
               height={Math.max(0, r[3] - r[1]) + pad * 2}
               vectorEffect="non-scaling-stroke"
-              strokeWidth={1.5}
+              strokeWidth={isActive ? 2.5 : 1.5}
               onClick={() => onPick(f)}
               className={cn(
                 "cursor-pointer transition-colors",
                 isActive
-                  ? "fill-warning/30 stroke-warning"
+                  ? "fill-transparent stroke-warning"
                   : "fill-transparent stroke-transparent hover:fill-primary/10 hover:stroke-primary/50",
               )}
             />
