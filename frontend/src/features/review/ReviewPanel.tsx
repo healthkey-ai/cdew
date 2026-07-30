@@ -228,16 +228,34 @@ function FactCard({
           {showNotLocated && <span className="text-[10px] text-muted-foreground">not located</span>}
         </div>
         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-          <Button variant="ghost" size="icon" className="size-7 text-success" aria-label="Approve" onClick={onApprove}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("size-7 text-success", fact.status === "approved" && "bg-success/15 ring-1 ring-success/40")}
+            aria-label={fact.status === "approved" ? "Undo approve" : "Approve"}
+            aria-pressed={fact.status === "approved"}
+            onClick={onApprove}
+          >
             <Check />
           </Button>
-          <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Reject" onClick={onReject}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "size-7 text-destructive",
+              fact.status === "rejected" && "bg-destructive/15 ring-1 ring-destructive/40",
+            )}
+            aria-label={fact.status === "rejected" ? "Undo reject" : "Reject"}
+            aria-pressed={fact.status === "rejected"}
+            onClick={onReject}
+          >
             <X />
           </Button>
         </div>
       </div>
 
-      <div className="mt-2 space-y-1" onClick={(e) => e.stopPropagation()}>
+      {/* No stopPropagation: clicking a field also selects the fact (shows its bboxes). */}
+      <div className="mt-2 space-y-1">
         {Object.keys(draft).length === 0 && <p className="text-xs text-muted-foreground">No fields.</p>}
         {Object.entries(draft).map(([key, value]) => (
           <div key={key} className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
@@ -378,12 +396,20 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
                   onSave={(payload) =>
                     actions.editFact.mutate({ id: f.id, payload }, { onSuccess: () => toast.success("Fact updated") })
                   }
-                  onApprove={() =>
-                    actions.editFact.mutate({ id: f.id, status: "approved" }, { onSuccess: () => toast.success("Approved") })
-                  }
-                  onReject={() =>
-                    actions.editFact.mutate({ id: f.id, status: "rejected" }, { onSuccess: () => toast.success("Rejected") })
-                  }
+                  onApprove={() => {
+                    const undo = f.status === "approved";
+                    actions.editFact.mutate(
+                      { id: f.id, status: undo ? "staged" : "approved" },
+                      { onSuccess: () => toast.success(undo ? "Approval undone" : "Approved") },
+                    );
+                  }}
+                  onReject={() => {
+                    const undo = f.status === "rejected";
+                    actions.editFact.mutate(
+                      { id: f.id, status: undo ? "staged" : "rejected" },
+                      { onSuccess: () => toast.success(undo ? "Rejection undone" : "Rejected") },
+                    );
+                  }}
                 />
               ))}
               {facts.data && facts.data.length === 0 && (
