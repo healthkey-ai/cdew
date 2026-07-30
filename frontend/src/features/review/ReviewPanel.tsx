@@ -55,6 +55,28 @@ function usePageImageUrl(docId: number, page: number): string | null {
   return url;
 }
 
+/** Merge per-token boxes that share a line and touch/overlap into one rectangle,
+ * so a fact reads as a few clean boxes instead of many crowded, overlapping ones. */
+function mergeRects(rects: number[][]): number[][] {
+  const ROW = 0.012; // same-line y tolerance
+  const GAP = 0.012; // bridge horizontal gaps up to this
+  const row = (r: number[]) => Math.round((r[1] + r[3]) / 2 / ROW);
+  const sorted = [...rects].sort((a, b) => row(a) - row(b) || a[0] - b[0]);
+  const out: number[][] = [];
+  for (const r of sorted) {
+    const cur = out[out.length - 1];
+    if (cur && row(cur) === row(r) && r[0] <= cur[2] + GAP) {
+      cur[0] = Math.min(cur[0], r[0]);
+      cur[1] = Math.min(cur[1], r[1]);
+      cur[2] = Math.max(cur[2], r[2]);
+      cur[3] = Math.max(cur[3], r[3]);
+    } else {
+      out.push([...r]);
+    }
+  }
+  return out;
+}
+
 /** Vertical center (0..1) of a fact's dominant bbox cluster on a page. A fact's
  * boxes usually share one row; if a stray box lands elsewhere, cluster by y and
  * take the largest group so we scroll to where the boxes actually cluster. */
@@ -117,7 +139,7 @@ function PageOverlay({
         {pageFacts.flatMap((f) => {
           const isActive = active?.id === f.id;
           const pad = isActive ? 0.005 : 0; // grow the selected box a few px so it doesn't clip the text
-          return (f.provenance.bbox?.rects ?? []).map((r, i) => (
+          return mergeRects(f.provenance.bbox?.rects ?? []).map((r, i) => (
             <rect
               key={`${f.id}-${i}`}
               x={r[0] - pad}
