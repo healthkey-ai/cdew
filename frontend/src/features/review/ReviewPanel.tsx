@@ -418,7 +418,7 @@ export function ReviewPanel({ docId, name }: { docId: number; name: string }) {
 
   return (
     <Card>
-      <CardContent className="pt-6">
+      <CardContent>
         <h2 className="mb-3 text-base font-semibold tracking-tight">
           Reviewing · <span className="font-normal text-muted-foreground">{name}</span>
         </h2>
