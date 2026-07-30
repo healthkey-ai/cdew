@@ -14,20 +14,15 @@ export function ReviewDocumentPage() {
   if (!id) return null;
   const name = doc.data?.original_filename || `Document #${id}`;
   return (
-    <section className="space-y-4">
-      <div className="space-y-1.5">
-        <Link
-          to="/review"
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="size-4 shrink-0" />
-          Review
-        </Link>
-        <h1 className="text-xl font-semibold tracking-tight">
-          Reviewing · <span className="font-normal text-muted-foreground">{name}</span>
-        </h1>
-      </div>
-      <ReviewPanel docId={id} />
+    <section className="space-y-3">
+      <Link
+        to="/review"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-4 shrink-0" />
+        Review list
+      </Link>
+      <ReviewPanel docId={id} name={name} />
     </section>
   );
 }

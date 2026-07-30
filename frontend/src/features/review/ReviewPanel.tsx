@@ -300,7 +300,7 @@ function FactCard({
 
 /** Phase 6 Review UI (design §6): the document (image with bbox overlays by
  * default, or parsed text) beside per-fact editable form cards; verify. */
-export function ReviewPanel({ docId }: { docId: number }) {
+export function ReviewPanel({ docId, name }: { docId: number; name: string }) {
   const text = useDocumentText(docId);
   const facts = useDocumentExtractions(docId);
   const actions = useReviewActions(docId);
@@ -419,7 +419,10 @@ export function ReviewPanel({ docId }: { docId: number }) {
   return (
     <Card>
       <CardContent className="pt-6">
-        <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-11rem)] lg:grid-cols-[360px_1fr]">
+        <h2 className="mb-3 text-base font-semibold tracking-tight">
+          Reviewing · <span className="font-normal text-muted-foreground">{name}</span>
+        </h2>
+        <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-15rem)] lg:grid-cols-[360px_1fr]">
           {/* left: facts as editable form cards + verify */}
           <div className="flex min-h-0 flex-col gap-3">
             <div className="flex shrink-0 items-center justify-between">
