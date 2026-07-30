@@ -242,17 +242,27 @@ function FactCard({
   onApprove: () => void;
   onReject: () => void;
 }) {
-  const [draft, setDraft] = useState<Record<string, unknown>>(fact.payload);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(fact.payload);
+  // Edit as raw strings so partial input (e.g. "1." while typing "1.5") is
+  // preserved; coerce back to the payload's field types only for the dirty
+  // check and save.
+  const [draft, setDraft] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.entries(fact.payload).map(([k, v]) => [k, v == null ? "" : String(v)])),
+  );
+  const coerced = useMemo<Record<string, unknown>>(() => {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(draft)) {
+      const orig = fact.payload[k];
+      if (typeof orig === "number") out[k] = v.trim() === "" ? null : Number.isNaN(Number(v)) ? v : Number(v);
+      else if (typeof orig === "boolean") out[k] = v === "true" ? true : v === "false" ? false : v;
+      else if (orig === null) out[k] = v.trim() === "" ? null : v;
+      else out[k] = v;
+    }
+    return out;
+  }, [draft, fact.payload]);
+  const dirty = JSON.stringify(coerced) !== JSON.stringify(fact.payload);
   const sb = statusBadge(fact.status);
 
-  const setField = (key: string, raw: string) => {
-    const orig = fact.payload[key];
-    let value: unknown = raw;
-    if (typeof orig === "number") value = raw.trim() === "" ? null : Number(raw);
-    if (typeof value === "number" && Number.isNaN(value)) value = raw; // keep unparseable input as text
-    setDraft((d) => ({ ...d, [key]: value }));
-  };
+  const setField = (key: string, raw: string) => setDraft((d) => ({ ...d, [key]: raw }));
 
   return (
     <li
@@ -308,13 +318,13 @@ function FactCard({
             <Input
               id={`f${fact.id}-${key}`}
               className="h-7 text-xs"
-              value={value == null ? "" : String(value)}
+              value={value}
               onChange={(e) => setField(key, e.target.value)}
             />
           </div>
         ))}
         {dirty && (
-          <Button variant="outline" size="sm" className="mt-1 h-7" disabled={saving} onClick={() => onSave(draft)}>
+          <Button variant="outline" size="sm" className="mt-1 h-7" disabled={saving} onClick={() => onSave(coerced)}>
             Save changes
           </Button>
         )}
