@@ -32,6 +32,9 @@ class ExtractionJob(models.Model):
 
     prefect_flow_run_id = models.CharField(max_length=64, blank=True, default="")
     errors = models.JSONField(default=list)  # [{"code": "..."}] — safe category codes only, never PHI
+    # Stage-entry timeline for the pipeline-log UI (#28): [{"stage": "...", "at": iso}].
+    # Stages + timestamps only — PHI-safe. A stage's duration = next entry's `at`.
+    stage_history = models.JSONField(default=list)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

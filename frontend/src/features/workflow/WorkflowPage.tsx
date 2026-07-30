@@ -10,6 +10,88 @@ import { type Job, type JobStatus, isJobActive, useCancelJob, useConfig, useJobs
 
 const pct = (p: number) => `${Math.round((p ?? 0) * 100)}%`;
 
+// Pipeline work-stages shown on the timeline (ingest happens at upload, pre-job).
+const PIPELINE = ["parse", "classify", "extract"] as const;
+type StageState = "done" | "active" | "failed" | "cancelled" | "skipped" | "pending";
+
+const STATE_DOT: Record<StageState, string> = {
+  done: "bg-success",
+  active: "bg-primary animate-pulse",
+  failed: "bg-destructive",
+  cancelled: "bg-muted-foreground",
+  skipped: "bg-muted-foreground/30",
+  pending: "bg-muted-foreground/30",
+};
+
+function fmtDur(ms: number | null): string {
+  if (ms == null || ms < 0) return "";
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+}
+
+function overallDur(job: Job): number | null {
+  if (!job.started_at) return null;
+  const end = job.finished_at ?? new Date().toISOString();
+  return new Date(end).getTime() - new Date(job.started_at).getTime();
+}
+
+/** Per-stage state + duration from the job's stage_history (#28). */
+function stageInfo(job: Job): { stage: string; state: StageState; dur: number | null }[] {
+  const hist = job.stage_history ?? [];
+  const active = isJobActive(job.status);
+  const nowIso = new Date().toISOString();
+  return PIPELINE.map((stage) => {
+    const idx = hist.findIndex((h) => h.stage === stage);
+    if (idx === -1) return { stage, state: (active ? "pending" : "skipped") as StageState, dur: null };
+    const endIso = hist[idx + 1]?.at ?? job.finished_at ?? nowIso;
+    const dur = new Date(endIso).getTime() - new Date(hist[idx].at).getTime();
+    const laterRan = idx + 1 < hist.length; // a later stage (or the done marker) was recorded
+    let state: StageState = "done";
+    if (!laterRan) {
+      if (job.status === "failed") state = "failed";
+      else if (job.status === "cancelled") state = "cancelled";
+      else if (active) state = "active";
+    }
+    return { stage, state, dur };
+  });
+}
+
+/** Readable stage timeline: parse → classify → extract with per-stage status +
+ * duration, and the PHI-safe error code on the stage that failed. */
+function StageTimeline({ job }: { job: Job }) {
+  const steps = stageInfo(job);
+  const err = job.errors?.[0]?.code;
+  return (
+    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+      {steps.map((s, i) => (
+        <div key={s.stage} className="flex items-center gap-1">
+          <span className={cn("size-2 shrink-0 rounded-full", STATE_DOT[s.state])} />
+          <span
+            className={cn(
+              "capitalize",
+              (s.state === "skipped" || s.state === "pending") && "text-muted-foreground/50",
+              s.state === "failed" && "font-medium text-destructive",
+            )}
+          >
+            {s.stage}
+          </span>
+          {s.dur != null && s.state !== "skipped" && s.state !== "pending" && (
+            <span className="tabular-nums text-muted-foreground">{fmtDur(s.dur)}</span>
+          )}
+          {s.state === "failed" && err && (
+            <Badge variant="destructive" className="ml-0.5 h-4 px-1 text-[10px] font-normal">
+              {err}
+            </Badge>
+          )}
+          {i < steps.length - 1 && <span className="mx-0.5 h-px w-3 shrink-0 bg-border" />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function statusBadge(s: JobStatus) {
   const map: Record<JobStatus, { variant: "default" | "secondary" | "destructive" | "outline"; cls?: string }> = {
     running: { variant: "default" },
@@ -95,9 +177,9 @@ export function WorkflowPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Document</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Stage</TableHead>
-              <TableHead className="w-24">Progress</TableHead>
+              <TableHead className="w-28">Status</TableHead>
+              <TableHead>Pipeline</TableHead>
+              <TableHead className="w-20">Duration</TableHead>
               <TableHead className="w-40 text-right" />
             </TableRow>
           </TableHeader>
@@ -106,17 +188,14 @@ export function WorkflowPage() {
               const link = runLink(j);
               return (
                 <TableRow key={j.id}>
-                  <TableCell className="max-w-[18rem] truncate font-medium" title={j.document_filename}>
+                  <TableCell className="max-w-[16rem] truncate font-medium" title={j.document_filename}>
                     {j.document_filename || `doc #${j.document}`}
                   </TableCell>
+                  <TableCell>{statusBadge(j.status)}</TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      {statusBadge(j.status)}
-                      {j.errors?.[0]?.code && <span className="text-xs text-destructive">{j.errors[0].code}</span>}
-                    </div>
+                    <StageTimeline job={j} />
                   </TableCell>
-                  <TableCell className="text-sm capitalize text-muted-foreground">{j.stage}</TableCell>
-                  <TableCell className="text-sm tabular-nums text-muted-foreground">{pct(j.progress)}</TableCell>
+                  <TableCell className="text-sm tabular-nums text-muted-foreground">{fmtDur(overallDur(j))}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
                       {link && (

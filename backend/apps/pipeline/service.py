@@ -37,6 +37,11 @@ class DirectRunner:
         return extract_document(doc, routed_types)
 
 
+def _stamp(job: ExtractionJob, stage: str) -> None:
+    """Append a stage-entry timestamp to the job's timeline (PHI-safe, #28)."""
+    job.stage_history = [*(job.stage_history or []), {"stage": str(stage), "at": timezone.now().isoformat()}]
+
+
 def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
     runner = runner or DirectRunner()
     job = ExtractionJob.objects.select_related("document").get(id=job_id)
@@ -46,7 +51,8 @@ def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
     job.stage = Stage.PARSE
     job.progress = 0.1
     job.started_at = timezone.now()
-    job.save(update_fields=["status", "stage", "progress", "started_at", "updated_at"])
+    _stamp(job, Stage.PARSE)
+    job.save(update_fields=["status", "stage", "progress", "started_at", "stage_history", "updated_at"])
 
     try:
         parse_document(doc)
@@ -74,7 +80,8 @@ def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
 
     job.stage = Stage.CLASSIFY
     job.progress = 0.6
-    job.save(update_fields=["stage", "progress", "updated_at"])
+    _stamp(job, Stage.CLASSIFY)
+    job.save(update_fields=["stage", "progress", "stage_history", "updated_at"])
     try:
         routed_types = runner.classify(doc)
         doc.refresh_from_db()
@@ -87,7 +94,8 @@ def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
     if doc.status == DocumentStatus.CLASSIFIED:
         job.stage = Stage.EXTRACT
         job.progress = 0.85
-        job.save(update_fields=["stage", "progress", "updated_at"])
+        _stamp(job, Stage.EXTRACT)
+        job.save(update_fields=["stage", "progress", "stage_history", "updated_at"])
         try:
             runner.extract(doc, routed_types)
         except Exception:
@@ -102,8 +110,12 @@ def _finish(job: ExtractionJob, status: str, errors=None) -> ExtractionJob:
     job.stage = Stage.DONE
     job.progress = 1.0
     job.finished_at = timezone.now()
+    # Record the terminal marker only on success — on failure/cancel the last
+    # stage_history entry stays the stage that stopped, so the UI can show where.
+    if status == JobStatus.COMPLETED:
+        _stamp(job, Stage.DONE)
     if errors:
         job.errors = errors
-    job.save(update_fields=["status", "stage", "progress", "finished_at", "errors", "updated_at"])
+    job.save(update_fields=["status", "stage", "progress", "finished_at", "errors", "stage_history", "updated_at"])
     logger.info("pipeline: job=%s status=%s", job.id, status)
     return job
