@@ -114,26 +114,28 @@ function PageOverlay({
         <div className="flex h-40 items-center justify-center text-xs text-muted-foreground">loading page {page}…</div>
       )}
       <svg viewBox="0 0 1 1" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-        {pageFacts.flatMap((f) =>
-          (f.provenance.bbox?.rects ?? []).map((r, i) => (
+        {pageFacts.flatMap((f) => {
+          const isActive = active?.id === f.id;
+          const pad = isActive ? 0.005 : 0; // grow the selected box a few px so it doesn't clip the text
+          return (f.provenance.bbox?.rects ?? []).map((r, i) => (
             <rect
               key={`${f.id}-${i}`}
-              x={r[0]}
-              y={r[1]}
-              width={Math.max(0, r[2] - r[0])}
-              height={Math.max(0, r[3] - r[1])}
+              x={r[0] - pad}
+              y={r[1] - pad}
+              width={Math.max(0, r[2] - r[0]) + pad * 2}
+              height={Math.max(0, r[3] - r[1]) + pad * 2}
               vectorEffect="non-scaling-stroke"
               strokeWidth={1.5}
               onClick={() => onPick(f)}
               className={cn(
                 "cursor-pointer transition-colors",
-                active?.id === f.id
+                isActive
                   ? "fill-warning/30 stroke-warning"
-                  : "fill-primary/5 stroke-primary/40 hover:fill-primary/20",
+                  : "fill-transparent stroke-transparent hover:fill-primary/10 hover:stroke-primary/50",
               )}
             />
-          )),
-        )}
+          ));
+        })}
       </svg>
     </div>
   );
