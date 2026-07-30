@@ -1,15 +1,22 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, FileText, Image as ImageIcon, Loader2, X } from "lucide-react";
+import { Check, FileText, Image as ImageIcon, Loader2, Plus, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   type ExtractionRecord,
   type Geometry,
@@ -171,6 +178,17 @@ function DocumentImageView({
 
 const CATEGORIES = ["office_visit", "diagnosis_hrv", "labs", "biopsy", "imaging", "other"];
 
+// Fallback fields per type when the document has no existing fact of that type to
+// mirror. When it does, the Add-a-fact form uses that fact's field set instead.
+const FIELD_TEMPLATES: Record<string, string[]> = {
+  labs: ["test_name", "value", "unit", "ref_low", "ref_high", "abnormal_flag", "collected_date"],
+  imaging: ["modality", "body_site", "finding", "impression"],
+  office_visit: ["assessment", "plan"],
+  diagnosis_hrv: ["condition", "status", "date"],
+  biopsy: ["site", "diagnosis", "result"],
+  other: ["name", "value"],
+};
+
 function statusBadge(status: string): { variant: "secondary" | "destructive" | "outline"; className?: string } {
   if (status === "approved") return { variant: "secondary", className: "text-success" };
   if (status === "rejected") return { variant: "destructive" };
@@ -328,9 +346,31 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
     }
   }, [job?.status, docId, qc]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [addOpen, setAddOpen] = useState(false);
   const [newSnippet, setNewSnippet] = useState("");
   const [newDomain, setNewDomain] = useState("labs");
-  const [newPayload, setNewPayload] = useState('{"test_name": "", "value": "", "unit": ""}');
+  const [newFields, setNewFields] = useState<Record<string, string>>({});
+
+  // A representative existing fact of the chosen type (its fields become the form,
+  // and its value types drive number coercion on submit).
+  const sampleFor = (domain: string) =>
+    facts.data?.find((f) => (f.domain || f.extractor_key) === domain)?.payload;
+  const fieldsForDomain = (domain: string): string[] => {
+    const sample = sampleFor(domain);
+    if (sample && Object.keys(sample).length) return Object.keys(sample);
+    return FIELD_TEMPLATES[domain] ?? ["name", "value"];
+  };
+  // Reset the form fields to the type's template whenever the dialog opens or the
+  // type changes.
+  useEffect(() => {
+    if (addOpen) setNewFields(Object.fromEntries(fieldsForDomain(newDomain).map((k) => [k, ""])));
+  }, [addOpen, newDomain]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openAdd = () => {
+    const sel = window.getSelection()?.toString().trim();
+    if (sel) setNewSnippet(sel); // pre-fill from any current document selection
+    setAddOpen(true);
+  };
 
   const content = text.data?.content ?? "";
   const highlighted = useMemo(() => {
@@ -346,17 +386,21 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
   };
 
   const addFact = () => {
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(newPayload);
-    } catch {
-      toast.error("Invalid JSON payload");
-      return;
+    const sample = sampleFor(newDomain);
+    const payload: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(newFields)) {
+      const numeric = sample && typeof sample[k] === "number";
+      if (v.trim() === "") payload[k] = numeric ? null : "";
+      else payload[k] = numeric && !Number.isNaN(Number(v)) ? Number(v) : v;
     }
     actions.addFact.mutate(
       { document: docId, domain: newDomain, snippet: newSnippet, payload },
       {
-        onSuccess: () => { setNewSnippet(""); toast.success("Fact added"); },
+        onSuccess: () => {
+          setAddOpen(false);
+          setNewSnippet("");
+          toast.success("Fact added");
+        },
         onError: () => toast.error("Could not add fact (snippet must match the text)"),
       },
     );
@@ -382,8 +426,14 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-14rem)] lg:grid-cols-[360px_1fr]">
-          {/* left: facts as editable form cards + verify + add-a-fact */}
+          {/* left: facts as editable form cards + verify */}
           <div className="flex min-h-0 flex-col gap-3">
+            <div className="flex shrink-0 items-center justify-between">
+              <h3 className="text-sm font-semibold">Facts{facts.data ? ` (${facts.data.length})` : ""}</h3>
+              <Button variant="outline" size="sm" className="h-8" onClick={openAdd}>
+                <Plus className="size-4" /> Add fact
+              </Button>
+            </div>
             <ul className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
               {facts.data?.map((f) => (
                 <FactCard
@@ -435,40 +485,6 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
               </Select>
               <Button onClick={onVerify}>Verify</Button>
             </div>
-
-            <div className="shrink-0 space-y-2 rounded-md border p-3">
-              <Label>Add a fact</Label>
-              <Input
-                value={newSnippet}
-                onChange={(e) => setNewSnippet(e.target.value)}
-                placeholder="snippet (exact text)"
-              />
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={useSelection}>
-                  Use selection
-                </Button>
-                <Select value={newDomain} onValueChange={(v) => setNewDomain(v ?? "labs")}>
-                  <SelectTrigger className="w-36">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CATEGORIES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Textarea
-                className="h-16 font-mono text-xs"
-                value={newPayload}
-                onChange={(e) => setNewPayload(e.target.value)}
-              />
-              <Button size="sm" onClick={addFact}>
-                Add fact
-              </Button>
-            </div>
           </div>
 
           {/* right: document — image with bbox overlays (default) or parsed text */}
@@ -517,6 +533,74 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
             )}
           </div>
         </div>
+
+        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add a fact</DialogTitle>
+              <DialogDescription>
+                Manually add a fact grounded in a verbatim snippet from the document.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
+                <Label>Type</Label>
+                <Select value={newDomain} onValueChange={(v) => setNewDomain(v ?? "labs")}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-[6rem_1fr] items-start gap-2">
+                <Label className="pt-2">Snippet</Label>
+                <div className="space-y-1.5">
+                  <Input
+                    value={newSnippet}
+                    onChange={(e) => setNewSnippet(e.target.value)}
+                    placeholder="exact text from the document"
+                  />
+                  <Button variant="outline" size="sm" onClick={useSelection}>
+                    Use selection
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 border-t pt-3">
+                {Object.entries(newFields).map(([key, value]) => (
+                  <div key={key} className="grid grid-cols-[6rem_1fr] items-center gap-2">
+                    <Label htmlFor={`new-${key}`} className="truncate text-xs font-normal text-muted-foreground">
+                      {key}
+                    </Label>
+                    <Input
+                      id={`new-${key}`}
+                      className="h-8"
+                      value={value}
+                      onChange={(e) => setNewFields((s) => ({ ...s, [key]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAddOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={addFact} disabled={actions.addFact.isPending || !newSnippet.trim()}>
+                Add fact
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
