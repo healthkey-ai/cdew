@@ -1,4 +1,4 @@
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 import { ReviewPanel } from "./ReviewPanel";
 
@@ -6,7 +6,6 @@ import { ReviewPanel } from "./ReviewPanel";
  * ReviewPanel (parsed text / document image + bbox overlays, approve/reject/verify). */
 export function ReviewDocumentPage() {
   const { docId } = useParams();
-  const navigate = useNavigate();
   const id = Number(docId);
   if (!id) return null;
   return (
@@ -14,7 +13,7 @@ export function ReviewDocumentPage() {
       <Link to="/review" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline">
         ← Review
       </Link>
-      <ReviewPanel docId={id} onClose={() => navigate("/review")} />
+      <ReviewPanel docId={id} />
     </section>
   );
 }

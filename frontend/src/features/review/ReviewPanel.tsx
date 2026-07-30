@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   type ExtractionRecord,
   type Geometry,
+  useDocument,
   useDocumentExtractions,
   useDocumentText,
   useGeometry,
@@ -300,10 +301,12 @@ function FactCard({
 
 /** Phase 6 Review UI (design §6): the document (image with bbox overlays by
  * default, or parsed text) beside per-fact editable form cards; verify. */
-export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => void }) {
+export function ReviewPanel({ docId }: { docId: number }) {
+  const doc = useDocument(docId);
   const text = useDocumentText(docId);
   const facts = useDocumentExtractions(docId);
   const actions = useReviewActions(docId);
+  const title = doc.data?.original_filename || `Document #${docId}`;
 
   const [active, setActive] = useState<ExtractionRecord | null>(null);
   const [category, setCategory] = useState("labs");
@@ -418,11 +421,8 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
-        <CardTitle>Review · document #{docId}</CardTitle>
-        <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose}>
-          <X />
-        </Button>
+      <CardHeader>
+        <CardTitle className="truncate">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-14rem)] lg:grid-cols-[360px_1fr]">
