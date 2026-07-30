@@ -13,9 +13,10 @@ const COLS = "grid-cols-[1fr_8rem_10rem_1fr_6rem]";
  * (matching the Inbox). Open one to verify facts on the document. */
 export function ReviewPage() {
   const navigate = useNavigate();
-  const docs = useDocuments();
-  // "Processed" = the document has been parsed (has extractable text).
-  const rows = (docs.data?.results ?? []).filter((d) => d.has_text);
+  // Ready for review = classified (routed + extracted). Excludes docs still
+  // needing classification, parse failures, and in-flight ones.
+  const docs = useDocuments(undefined, "classified");
+  const rows = docs.data?.results ?? [];
 
   return (
     <section className="space-y-6">
