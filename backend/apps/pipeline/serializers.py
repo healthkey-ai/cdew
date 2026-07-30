@@ -10,6 +10,6 @@ class ExtractionJobSerializer(serializers.ModelSerializer):
         model = ExtractionJob
         fields = (
             "id", "document", "document_filename", "status", "stage", "progress", "errors",
-            "prefect_flow_run_id", "created_at", "started_at", "finished_at",
+            "stage_history", "prefect_flow_run_id", "created_at", "started_at", "finished_at",
         )
         read_only_fields = fields

@@ -154,6 +154,22 @@ class PipelineServiceTests(TestCase):
         assert job.stage == Stage.DONE
         # lab content is classified → routed → CLASSIFIED (parse then classify)
         assert job.document.status == DocumentStatus.CLASSIFIED
+        # stage timeline records each stage entered, in order, with timestamps (#28)
+        stages = [h["stage"] for h in job.stage_history]
+        assert stages == [Stage.PARSE, Stage.CLASSIFY, Stage.EXTRACT, Stage.DONE]
+        assert all(h.get("at") for h in job.stage_history)
+
+    def test_stage_history_stops_at_failed_stage(self):
+        # A parse failure leaves the timeline ending at the stage that stopped
+        # (no DONE marker), so the log UI can show where it failed.
+        doc = _doc()
+        job = ExtractionJob.objects.create(document=doc)
+        with patch("apps.pipeline.service.parse_document", side_effect=RuntimeError("boom")):
+            execute_pipeline(job.id)
+        job.refresh_from_db()
+        assert job.status == JobStatus.FAILED
+        assert [h["stage"] for h in job.stage_history] == [Stage.PARSE]  # no DONE marker
+        assert job.errors == [{"code": "pipeline_error"}]
 
     def test_needs_classification_still_completes(self):
         # Image with no text layer → ~empty parse → doc flagged, but job completes.

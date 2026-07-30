@@ -13,6 +13,7 @@ export interface Job {
   stage: JobStage;
   progress: number; // 0..1
   errors: { code: string }[];
+  stage_history: { stage: string; at: string }[]; // pipeline timeline (#28)
   prefect_flow_run_id: string;
   created_at: string;
   started_at: string | null;
