@@ -5,7 +5,7 @@ import { Check, FileText, Image as ImageIcon, Loader2, Plus, X } from "lucide-re
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   type ExtractionRecord,
   type Geometry,
-  useDocument,
   useDocumentExtractions,
   useDocumentText,
   useGeometry,
@@ -302,11 +301,9 @@ function FactCard({
 /** Phase 6 Review UI (design §6): the document (image with bbox overlays by
  * default, or parsed text) beside per-fact editable form cards; verify. */
 export function ReviewPanel({ docId }: { docId: number }) {
-  const doc = useDocument(docId);
   const text = useDocumentText(docId);
   const facts = useDocumentExtractions(docId);
   const actions = useReviewActions(docId);
-  const title = doc.data?.original_filename || `Document #${docId}`;
 
   const [active, setActive] = useState<ExtractionRecord | null>(null);
   const [category, setCategory] = useState("labs");
@@ -421,11 +418,8 @@ export function ReviewPanel({ docId }: { docId: number }) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="truncate">{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-14rem)] lg:grid-cols-[360px_1fr]">
+      <CardContent className="pt-6">
+        <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-11rem)] lg:grid-cols-[360px_1fr]">
           {/* left: facts as editable form cards + verify */}
           <div className="flex min-h-0 flex-col gap-3">
             <div className="flex shrink-0 items-center justify-between">

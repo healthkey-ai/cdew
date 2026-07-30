@@ -1,4 +1,7 @@
 import { Link, useParams } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
+
+import { useDocument } from "@/features/documents/api";
 
 import { ReviewPanel } from "./ReviewPanel";
 
@@ -7,11 +10,19 @@ import { ReviewPanel } from "./ReviewPanel";
 export function ReviewDocumentPage() {
   const { docId } = useParams();
   const id = Number(docId);
+  const doc = useDocument(id || null);
   if (!id) return null;
+  const name = doc.data?.original_filename || `Document #${id}`;
   return (
     <section className="space-y-4">
-      <Link to="/review" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline">
-        ← Review
+      <Link
+        to="/review"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-4 shrink-0" />
+        <span>
+          Reviewing · <span className="font-medium text-foreground">{name}</span>
+        </span>
       </Link>
       <ReviewPanel docId={id} />
     </section>
