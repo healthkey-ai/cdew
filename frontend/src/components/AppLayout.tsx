@@ -34,7 +34,7 @@ export function AppLayout() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-2.5">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-2.5">
           <div className="flex items-center gap-5">
             <div className="flex items-center gap-2">
               <span className="text-base font-bold tracking-tight">CDEW</span>
@@ -103,7 +103,7 @@ export function AppLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-6">
+      <main className="mx-auto max-w-7xl px-6 py-6">
         <Outlet />
       </main>
     </div>

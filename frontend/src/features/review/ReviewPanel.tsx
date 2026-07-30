@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, FileText, Image as ImageIcon, Loader2, Pencil, X } from "lucide-react";
+import { Check, FileText, Image as ImageIcon, Loader2, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -161,7 +161,7 @@ function DocumentImageView({
     );
   }
   return (
-    <div className="max-h-[32rem] space-y-3 overflow-auto">
+    <div className="max-h-[80vh] space-y-3 overflow-auto">
       {geometry.pages.map((p) => (
         <PageOverlay key={p.page} docId={docId} page={p.page} facts={facts} active={active} onPick={onPick} />
       ))}
@@ -178,26 +178,116 @@ function statusBadge(status: string): { variant: "secondary" | "destructive" | "
   return { variant: "secondary" };
 }
 
-/** Phase 6 Review UI (design §6): parsed text with click-to-highlight on the
- * left; per-fact approve/reject/edit + add-a-fact on the right; verify. */
+/** One fact rendered as an editable form card (labeled fields, not raw JSON).
+ * Selecting the card highlights its provenance on the document. */
+function FactCard({
+  fact,
+  active,
+  saving,
+  showNotLocated,
+  onSelect,
+  onSave,
+  onApprove,
+  onReject,
+}: {
+  fact: ExtractionRecord;
+  active: boolean;
+  saving: boolean;
+  showNotLocated: boolean;
+  onSelect: () => void;
+  onSave: (payload: Record<string, unknown>) => void;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const [draft, setDraft] = useState<Record<string, unknown>>(fact.payload);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(fact.payload);
+  const sb = statusBadge(fact.status);
+
+  const setField = (key: string, raw: string) => {
+    const orig = fact.payload[key];
+    let value: unknown = raw;
+    if (typeof orig === "number") value = raw.trim() === "" ? null : Number(raw);
+    if (typeof value === "number" && Number.isNaN(value)) value = raw; // keep unparseable input as text
+    setDraft((d) => ({ ...d, [key]: value }));
+  };
+
+  return (
+    <li
+      onClick={onSelect}
+      className={cn(
+        "cursor-pointer rounded-md border p-2.5 transition-colors hover:border-warning/60",
+        active && "border-warning ring-1 ring-warning/40",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Badge variant="secondary">{fact.domain || fact.extractor_key}</Badge>
+          <Badge variant={sb.variant} className={sb.className}>
+            {fact.status}
+          </Badge>
+          {showNotLocated && <span className="text-[10px] text-muted-foreground">not located</span>}
+        </div>
+        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+          <Button variant="ghost" size="icon" className="size-7 text-success" aria-label="Approve" onClick={onApprove}>
+            <Check />
+          </Button>
+          <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Reject" onClick={onReject}>
+            <X />
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-2 space-y-1" onClick={(e) => e.stopPropagation()}>
+        {Object.keys(draft).length === 0 && <p className="text-xs text-muted-foreground">No fields.</p>}
+        {Object.entries(draft).map(([key, value]) => (
+          <div key={key} className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
+            <Label htmlFor={`f${fact.id}-${key}`} className="truncate text-[11px] font-normal text-muted-foreground">
+              {key}
+            </Label>
+            <Input
+              id={`f${fact.id}-${key}`}
+              className="h-7 text-xs"
+              value={value == null ? "" : String(value)}
+              onChange={(e) => setField(key, e.target.value)}
+            />
+          </div>
+        ))}
+        {dirty && (
+          <Button variant="outline" size="sm" className="mt-1 h-7" disabled={saving} onClick={() => onSave(draft)}>
+            Save changes
+          </Button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** Phase 6 Review UI (design §6): the document (image with bbox overlays by
+ * default, or parsed text) beside per-fact editable form cards; verify. */
 export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => void }) {
   const text = useDocumentText(docId);
   const facts = useDocumentExtractions(docId);
   const actions = useReviewActions(docId);
 
   const [active, setActive] = useState<ExtractionRecord | null>(null);
-  const [editId, setEditId] = useState<number | null>(null);
-  const [editJson, setEditJson] = useState("");
   const [category, setCategory] = useState("labs");
 
-  // Document view: parsed text (default) or the image with bbox overlays (#70).
-  const [docView, setDocView] = useState<"text" | "image">("text");
+  // Document view: the image with bbox overlays (default, #70) or the parsed text.
+  const [docView, setDocView] = useState<"image" | "text">("image");
   const geometry = useGeometry(docId, docView === "image");
   const triggerGeom = useTriggerGeometry(docId);
-  const showImage = () => {
-    setDocView("image");
-    if (geometry.data?.status !== "ready") triggerGeom.mutate(); // POST is a no-op if already ready
-  };
+  // Compute geometry on demand when the Document (image) view is shown and it
+  // isn't ready/pending yet — including on first mount, since image is default.
+  useEffect(() => {
+    if (
+      docView === "image" &&
+      triggerGeom.isIdle &&
+      geometry.data?.status !== "ready" &&
+      geometry.data?.status !== "pending"
+    ) {
+      triggerGeom.mutate();
+    }
+  }, [docView, geometry.data?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Geometry populates each fact's bbox server-side; refetch the extractions once
   // it's ready so the overlay picks up the boxes without needing a manual edit.
@@ -237,20 +327,6 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
     else toast.info("Select text in the document first");
   };
 
-  const saveEdit = (f: ExtractionRecord) => {
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(editJson);
-    } catch {
-      toast.error("Invalid JSON");
-      return;
-    }
-    actions.editFact.mutate(
-      { id: f.id, payload },
-      { onSuccess: () => { setEditId(null); toast.success("Fact updated"); } },
-    );
-  };
-
   const addFact = () => {
     let payload: Record<string, unknown>;
     try {
@@ -287,66 +363,66 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
         </Button>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/* left: document — parsed text with char highlight, or image with bbox overlays */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-1">
-              <Button
-                variant={docView === "text" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7"
-                onClick={() => setDocView("text")}
-              >
-                <FileText className="size-3.5" />
-                Text
-              </Button>
-              <Button
-                variant={docView === "image" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7"
-                onClick={showImage}
-              >
-                <ImageIcon className="size-3.5" />
-                Document
-              </Button>
-            </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
+          {/* left: facts as editable form cards + verify + add-a-fact */}
+          <div className="space-y-3">
+            <ul className="space-y-2">
+              {facts.data?.map((f) => (
+                <FactCard
+                  key={f.id}
+                  fact={f}
+                  active={active?.id === f.id}
+                  saving={actions.editFact.isPending}
+                  showNotLocated={docView === "image" && !f.provenance.bbox}
+                  onSelect={() => setActive(f)}
+                  onSave={(payload) =>
+                    actions.editFact.mutate({ id: f.id, payload }, { onSuccess: () => toast.success("Fact updated") })
+                  }
+                  onApprove={() =>
+                    actions.editFact.mutate({ id: f.id, status: "approved" }, { onSuccess: () => toast.success("Approved") })
+                  }
+                  onReject={() =>
+                    actions.editFact.mutate({ id: f.id, status: "rejected" }, { onSuccess: () => toast.success("Rejected") })
+                  }
+                />
+              ))}
+              {facts.data && facts.data.length === 0 && (
+                <li className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {extracting && <Loader2 className="size-3 animate-spin" />}
+                  {extracting ? "Extracting facts…" : "No facts."}
+                </li>
+              )}
+            </ul>
 
-            {docView === "image" ? (
-              <DocumentImageView
-                docId={docId}
-                geometry={geometry.data}
-                facts={facts.data ?? []}
-                active={active}
-                onPick={setActive}
-              />
-            ) : (
-              <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-relaxed">
-                {Array.isArray(highlighted) ? (
-                  <>
-                    {highlighted[0]}
-                    <mark className="rounded bg-warning/40 px-0.5">{highlighted[1]}</mark>
-                    {highlighted[2]}
-                  </>
-                ) : (
-                  highlighted || "(no text)"
-                )}
-              </pre>
-            )}
+            <div className="flex items-center gap-2 border-t pt-3">
+              <Select value={category} onValueChange={(v) => setCategory(v ?? "labs")}>
+                <SelectTrigger className="w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={onVerify}>Verify</Button>
+            </div>
 
             <div className="space-y-2 rounded-md border p-3">
               <Label>Add a fact</Label>
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  className="w-56"
-                  value={newSnippet}
-                  onChange={(e) => setNewSnippet(e.target.value)}
-                  placeholder="snippet (exact text)"
-                />
+              <Input
+                value={newSnippet}
+                onChange={(e) => setNewSnippet(e.target.value)}
+                placeholder="snippet (exact text)"
+              />
+              <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={useSelection}>
                   Use selection
                 </Button>
                 <Select value={newDomain} onValueChange={(v) => setNewDomain(v ?? "labs")}>
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger className="w-36">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -369,109 +445,50 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
             </div>
           </div>
 
-          {/* right: facts */}
-          <div className="space-y-3">
-            <ul className="space-y-1.5">
-              {facts.data?.map((f) => {
-                const sb = statusBadge(f.status);
-                return (
-                  <li
-                    key={f.id}
-                    onClick={() => setActive(f)}
-                    className={cn(
-                      "cursor-pointer rounded-md border p-2 text-xs transition-colors hover:border-warning/60",
-                      active?.id === f.id && "border-warning ring-1 ring-warning/40",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <Badge variant="secondary">{f.domain || f.extractor_key}</Badge>
-                        <Badge variant={sb.variant} className={sb.className}>
-                          {f.status}
-                        </Badge>
-                        {docView === "image" && !f.provenance.bbox && (
-                          <span className="text-[10px] text-muted-foreground">not located</span>
-                        )}
-                      </div>
-                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 text-success"
-                          aria-label="Approve"
-                          onClick={() =>
-                            actions.editFact.mutate({ id: f.id, status: "approved" }, { onSuccess: () => toast.success("Approved") })
-                          }
-                        >
-                          <Check />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 text-destructive"
-                          aria-label="Reject"
-                          onClick={() =>
-                            actions.editFact.mutate({ id: f.id, status: "rejected" }, { onSuccess: () => toast.success("Rejected") })
-                          }
-                        >
-                          <X />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          aria-label="Edit"
-                          onClick={() => {
-                            setEditId(f.id);
-                            setEditJson(JSON.stringify(f.payload, null, 0));
-                          }}
-                        >
-                          <Pencil />
-                        </Button>
-                      </div>
-                    </div>
-                    {editId === f.id ? (
-                      <div className="mt-2 space-y-1.5" onClick={(e) => e.stopPropagation()}>
-                        <Textarea
-                          className="h-16 font-mono text-xs"
-                          value={editJson}
-                          onChange={(e) => setEditJson(e.target.value)}
-                        />
-                        <Button variant="outline" size="sm" onClick={() => saveEdit(f)}>
-                          Save
-                        </Button>
-                      </div>
-                    ) : (
-                      <code className="mt-1 block break-all text-muted-foreground">
-                        {JSON.stringify(f.payload)}
-                      </code>
-                    )}
-                  </li>
-                );
-              })}
-              {facts.data && facts.data.length === 0 && (
-                <li className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  {extracting && <Loader2 className="size-3 animate-spin" />}
-                  {extracting ? "Extracting facts…" : "No facts."}
-                </li>
-              )}
-            </ul>
-
-            <div className="flex items-center gap-2 border-t pt-3">
-              <Select value={category} onValueChange={(v) => setCategory(v ?? "labs")}>
-                <SelectTrigger className="w-44">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button onClick={onVerify}>Verify document</Button>
+          {/* right: document — image with bbox overlays (default) or parsed text */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-1">
+              <Button
+                variant={docView === "image" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7"
+                onClick={() => setDocView("image")}
+              >
+                <ImageIcon className="size-3.5" />
+                Document
+              </Button>
+              <Button
+                variant={docView === "text" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7"
+                onClick={() => setDocView("text")}
+              >
+                <FileText className="size-3.5" />
+                Text
+              </Button>
             </div>
+
+            {docView === "image" ? (
+              <DocumentImageView
+                docId={docId}
+                geometry={geometry.data}
+                facts={facts.data ?? []}
+                active={active}
+                onPick={setActive}
+              />
+            ) : (
+              <pre className="max-h-[80vh] overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-relaxed">
+                {Array.isArray(highlighted) ? (
+                  <>
+                    {highlighted[0]}
+                    <mark className="rounded bg-warning/40 px-0.5">{highlighted[1]}</mark>
+                    {highlighted[2]}
+                  </>
+                ) : (
+                  highlighted || "(no text)"
+                )}
+              </pre>
+            )}
           </div>
         </div>
       </CardContent>
