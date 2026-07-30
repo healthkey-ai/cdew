@@ -34,8 +34,11 @@ export function useReviewActions(docId: number) {
       onSuccess: invalidate,
     }),
     verify: useMutation({
-      mutationFn: async (category: string) =>
-        (await api.post(`/documents/${docId}/verify/`, { category })).data,
+      mutationFn: async () => (await api.post(`/documents/${docId}/verify/`, {})).data,
+      onSuccess: invalidate,
+    }),
+    unverify: useMutation({
+      mutationFn: async () => (await api.post(`/documents/${docId}/unverify/`, {})).data,
       onSuccess: invalidate,
     }),
   };

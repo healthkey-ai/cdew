@@ -31,7 +31,7 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
-        if self.action in ("verify", "destroy", "geometry", "page_image"):
+        if self.action in ("verify", "unverify", "destroy", "geometry", "page_image"):
             return [IsReviewer()]
         return super().get_permissions()
 
@@ -192,4 +192,14 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         doc.verified_at = timezone.now()
         doc.verified_by = request.user if request.user.is_authenticated else None
         doc.save(update_fields=["category", "verified_at", "verified_by", "updated_at"])
+        return Response(SourceDocumentSerializer(doc).data)
+
+    @action(detail=True, methods=["post"])
+    def unverify(self, request, pk=None):
+        """Undo verification (design §6) — clears the verified stamp so the
+        reviewer can revise facts and re-verify. No gate."""
+        doc = self.get_object()
+        doc.verified_at = None
+        doc.verified_by = None
+        doc.save(update_fields=["verified_at", "verified_by", "updated_at"])
         return Response(SourceDocumentSerializer(doc).data)

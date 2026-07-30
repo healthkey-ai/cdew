@@ -1,18 +1,26 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, FileText, Image as ImageIcon, Loader2, Pencil, X } from "lucide-react";
+import { Check, FileText, Image as ImageIcon, Loader2, Plus, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   type ExtractionRecord,
   type Geometry,
+  useDocument,
   useDocumentExtractions,
   useDocumentText,
   useGeometry,
@@ -45,6 +53,28 @@ function usePageImageUrl(docId: number, page: number): string | null {
     };
   }, [docId, page]);
   return url;
+}
+
+/** Merge per-token boxes that share a line and touch/overlap into one rectangle,
+ * so a fact reads as a few clean boxes instead of many crowded, overlapping ones. */
+function mergeRects(rects: number[][]): number[][] {
+  const ROW = 0.012; // same-line y tolerance
+  const GAP = 0.012; // bridge horizontal gaps up to this
+  const row = (r: number[]) => Math.round((r[1] + r[3]) / 2 / ROW);
+  const sorted = [...rects].sort((a, b) => row(a) - row(b) || a[0] - b[0]);
+  const out: number[][] = [];
+  for (const r of sorted) {
+    const cur = out[out.length - 1];
+    if (cur && row(cur) === row(r) && r[0] <= cur[2] + GAP) {
+      cur[0] = Math.min(cur[0], r[0]);
+      cur[1] = Math.min(cur[1], r[1]);
+      cur[2] = Math.max(cur[2], r[2]);
+      cur[3] = Math.max(cur[3], r[3]);
+    } else {
+      out.push([...r]);
+    }
+  }
+  return out;
 }
 
 /** Vertical center (0..1) of a fact's dominant bbox cluster on a page. A fact's
@@ -106,26 +136,28 @@ function PageOverlay({
         <div className="flex h-40 items-center justify-center text-xs text-muted-foreground">loading page {page}…</div>
       )}
       <svg viewBox="0 0 1 1" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
-        {pageFacts.flatMap((f) =>
-          (f.provenance.bbox?.rects ?? []).map((r, i) => (
+        {pageFacts.flatMap((f) => {
+          const isActive = active?.id === f.id;
+          const pad = isActive ? 0.005 : 0; // grow the selected box a few px so it doesn't clip the text
+          return mergeRects(f.provenance.bbox?.rects ?? []).map((r, i) => (
             <rect
               key={`${f.id}-${i}`}
-              x={r[0]}
-              y={r[1]}
-              width={Math.max(0, r[2] - r[0])}
-              height={Math.max(0, r[3] - r[1])}
+              x={r[0] - pad}
+              y={r[1] - pad}
+              width={Math.max(0, r[2] - r[0]) + pad * 2}
+              height={Math.max(0, r[3] - r[1]) + pad * 2}
               vectorEffect="non-scaling-stroke"
-              strokeWidth={1.5}
+              strokeWidth={isActive ? 2.5 : 1.5}
               onClick={() => onPick(f)}
               className={cn(
                 "cursor-pointer transition-colors",
-                active?.id === f.id
-                  ? "fill-warning/30 stroke-warning"
-                  : "fill-primary/5 stroke-primary/40 hover:fill-primary/20",
+                isActive
+                  ? "fill-transparent stroke-warning"
+                  : "fill-transparent stroke-transparent hover:fill-primary/10 hover:stroke-primary/50",
               )}
             />
-          )),
-        )}
+          ));
+        })}
       </svg>
     </div>
   );
@@ -161,7 +193,7 @@ function DocumentImageView({
     );
   }
   return (
-    <div className="max-h-[32rem] space-y-3 overflow-auto">
+    <div className="min-h-0 flex-1 space-y-3 overflow-auto">
       {geometry.pages.map((p) => (
         <PageOverlay key={p.page} docId={docId} page={p.page} facts={facts} active={active} onPick={onPick} />
       ))}
@@ -171,6 +203,17 @@ function DocumentImageView({
 
 const CATEGORIES = ["office_visit", "diagnosis_hrv", "labs", "biopsy", "imaging", "other"];
 
+// Fallback fields per type when the document has no existing fact of that type to
+// mirror. When it does, the Add-a-fact form uses that fact's field set instead.
+const FIELD_TEMPLATES: Record<string, string[]> = {
+  labs: ["test_name", "value", "unit", "ref_low", "ref_high", "abnormal_flag", "collected_date"],
+  imaging: ["modality", "body_site", "finding", "impression"],
+  office_visit: ["assessment", "plan"],
+  diagnosis_hrv: ["condition", "status", "date"],
+  biopsy: ["site", "diagnosis", "result"],
+  other: ["name", "value"],
+};
+
 function statusBadge(status: string): { variant: "secondary" | "destructive" | "outline"; className?: string } {
   if (status === "approved") return { variant: "secondary", className: "text-success" };
   if (status === "rejected") return { variant: "destructive" };
@@ -178,26 +221,146 @@ function statusBadge(status: string): { variant: "secondary" | "destructive" | "
   return { variant: "secondary" };
 }
 
-/** Phase 6 Review UI (design §6): parsed text with click-to-highlight on the
- * left; per-fact approve/reject/edit + add-a-fact on the right; verify. */
-export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => void }) {
+/** One fact rendered as an editable form card (labeled fields, not raw JSON).
+ * Selecting the card highlights its provenance on the document. */
+function FactCard({
+  fact,
+  active,
+  saving,
+  showNotLocated,
+  onSelect,
+  onSave,
+  onApprove,
+  onReject,
+}: {
+  fact: ExtractionRecord;
+  active: boolean;
+  saving: boolean;
+  showNotLocated: boolean;
+  onSelect: () => void;
+  onSave: (payload: Record<string, unknown>) => void;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  // Edit as raw strings so partial input (e.g. "1." while typing "1.5") is
+  // preserved; coerce back to the payload's field types only for the dirty
+  // check and save.
+  const [draft, setDraft] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.entries(fact.payload).map(([k, v]) => [k, v == null ? "" : String(v)])),
+  );
+  const coerced = useMemo<Record<string, unknown>>(() => {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(draft)) {
+      const orig = fact.payload[k];
+      if (typeof orig === "number") out[k] = v.trim() === "" ? null : Number.isNaN(Number(v)) ? v : Number(v);
+      else if (typeof orig === "boolean") out[k] = v === "true" ? true : v === "false" ? false : v;
+      else if (orig === null) out[k] = v.trim() === "" ? null : v;
+      else out[k] = v;
+    }
+    return out;
+  }, [draft, fact.payload]);
+  const dirty = JSON.stringify(coerced) !== JSON.stringify(fact.payload);
+  const sb = statusBadge(fact.status);
+
+  const setField = (key: string, raw: string) => setDraft((d) => ({ ...d, [key]: raw }));
+
+  return (
+    <li
+      onClick={onSelect}
+      className={cn(
+        "cursor-pointer rounded-md border p-2.5 transition-colors hover:border-warning/60",
+        active && "border-warning ring-1 ring-warning/40",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Badge variant="secondary">{fact.domain || fact.extractor_key}</Badge>
+          <Badge variant={sb.variant} className={sb.className}>
+            {fact.status}
+          </Badge>
+          {showNotLocated && <span className="text-[10px] text-muted-foreground">not located</span>}
+        </div>
+        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("size-7 text-success", fact.status === "approved" && "bg-success/15 ring-1 ring-success/40")}
+            aria-label={fact.status === "approved" ? "Undo approve" : "Approve"}
+            aria-pressed={fact.status === "approved"}
+            onClick={onApprove}
+          >
+            <Check />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "size-7 text-destructive",
+              fact.status === "rejected" && "bg-destructive/15 ring-1 ring-destructive/40",
+            )}
+            aria-label={fact.status === "rejected" ? "Undo reject" : "Reject"}
+            aria-pressed={fact.status === "rejected"}
+            onClick={onReject}
+          >
+            <X />
+          </Button>
+        </div>
+      </div>
+
+      {/* No stopPropagation: clicking a field also selects the fact (shows its bboxes). */}
+      <div className="mt-2 space-y-1">
+        {Object.keys(draft).length === 0 && <p className="text-xs text-muted-foreground">No fields.</p>}
+        {Object.entries(draft).map(([key, value]) => (
+          <div key={key} className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
+            <Label htmlFor={`f${fact.id}-${key}`} className="truncate text-[11px] font-normal text-muted-foreground">
+              {key}
+            </Label>
+            <Input
+              id={`f${fact.id}-${key}`}
+              className="h-7 text-xs"
+              value={value}
+              onChange={(e) => setField(key, e.target.value)}
+            />
+          </div>
+        ))}
+        {dirty && (
+          <Button variant="outline" size="sm" className="mt-1 h-7" disabled={saving} onClick={() => onSave(coerced)}>
+            Save changes
+          </Button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** Phase 6 Review UI (design §6): the document (image with bbox overlays by
+ * default, or parsed text) beside per-fact editable form cards; verify. */
+export function ReviewPanel({ docId }: { docId: number }) {
+  const doc = useDocument(docId);
   const text = useDocumentText(docId);
   const facts = useDocumentExtractions(docId);
   const actions = useReviewActions(docId);
+  const name = doc.data?.original_filename || `Document #${docId}`;
+  const verified = doc.data?.verified ?? false;
 
   const [active, setActive] = useState<ExtractionRecord | null>(null);
-  const [editId, setEditId] = useState<number | null>(null);
-  const [editJson, setEditJson] = useState("");
-  const [category, setCategory] = useState("labs");
 
-  // Document view: parsed text (default) or the image with bbox overlays (#70).
-  const [docView, setDocView] = useState<"text" | "image">("text");
+  // Document view: the image with bbox overlays (default, #70) or the parsed text.
+  const [docView, setDocView] = useState<"image" | "text">("image");
   const geometry = useGeometry(docId, docView === "image");
   const triggerGeom = useTriggerGeometry(docId);
-  const showImage = () => {
-    setDocView("image");
-    if (geometry.data?.status !== "ready") triggerGeom.mutate(); // POST is a no-op if already ready
-  };
+  // Compute geometry on demand when the Document (image) view is shown and it
+  // isn't ready/pending yet — including on first mount, since image is default.
+  useEffect(() => {
+    if (
+      docView === "image" &&
+      triggerGeom.isIdle &&
+      geometry.data?.status !== "ready" &&
+      geometry.data?.status !== "pending"
+    ) {
+      triggerGeom.mutate();
+    }
+  }, [docView, geometry.data?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Geometry populates each fact's bbox server-side; refetch the extractions once
   // it's ready so the overlay picks up the boxes without needing a manual edit.
@@ -220,9 +383,31 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
     }
   }, [job?.status, docId, qc]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [addOpen, setAddOpen] = useState(false);
   const [newSnippet, setNewSnippet] = useState("");
   const [newDomain, setNewDomain] = useState("labs");
-  const [newPayload, setNewPayload] = useState('{"test_name": "", "value": "", "unit": ""}');
+  const [newFields, setNewFields] = useState<Record<string, string>>({});
+
+  // A representative existing fact of the chosen type (its fields become the form,
+  // and its value types drive number coercion on submit).
+  const sampleFor = (domain: string) =>
+    facts.data?.find((f) => (f.domain || f.extractor_key) === domain)?.payload;
+  const fieldsForDomain = (domain: string): string[] => {
+    const sample = sampleFor(domain);
+    if (sample && Object.keys(sample).length) return Object.keys(sample);
+    return FIELD_TEMPLATES[domain] ?? ["name", "value"];
+  };
+  // Reset the form fields to the type's template whenever the dialog opens or the
+  // type changes.
+  useEffect(() => {
+    if (addOpen) setNewFields(Object.fromEntries(fieldsForDomain(newDomain).map((k) => [k, ""])));
+  }, [addOpen, newDomain]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openAdd = () => {
+    const sel = window.getSelection()?.toString().trim();
+    if (sel) setNewSnippet(sel); // pre-fill from any current document selection
+    setAddOpen(true);
+  };
 
   const content = text.data?.content ?? "";
   const highlighted = useMemo(() => {
@@ -237,39 +422,33 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
     else toast.info("Select text in the document first");
   };
 
-  const saveEdit = (f: ExtractionRecord) => {
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(editJson);
-    } catch {
-      toast.error("Invalid JSON");
-      return;
-    }
-    actions.editFact.mutate(
-      { id: f.id, payload },
-      { onSuccess: () => { setEditId(null); toast.success("Fact updated"); } },
-    );
-  };
-
   const addFact = () => {
-    let payload: Record<string, unknown>;
-    try {
-      payload = JSON.parse(newPayload);
-    } catch {
-      toast.error("Invalid JSON payload");
-      return;
+    const sample = sampleFor(newDomain);
+    const payload: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(newFields)) {
+      const numeric = sample && typeof sample[k] === "number";
+      if (v.trim() === "") payload[k] = numeric ? null : "";
+      else payload[k] = numeric && !Number.isNaN(Number(v)) ? Number(v) : v;
     }
     actions.addFact.mutate(
       { document: docId, domain: newDomain, snippet: newSnippet, payload },
       {
-        onSuccess: () => { setNewSnippet(""); toast.success("Fact added"); },
+        onSuccess: () => {
+          setAddOpen(false);
+          setNewSnippet("");
+          toast.success("Fact added");
+        },
         onError: () => toast.error("Could not add fact (snippet must match the text)"),
       },
     );
   };
 
-  const onVerify = () => {
-    actions.verify.mutate(category, {
+  const onVerifyToggle = () => {
+    if (verified) {
+      actions.unverify.mutate(undefined, { onSuccess: () => toast.success("Verification undone") });
+      return;
+    }
+    actions.verify.mutate(undefined, {
       onSuccess: () => toast.success("Document verified"),
       onError: (err) => {
         const status = (err as { response?: { status?: number } }).response?.status;
@@ -279,18 +458,82 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
   };
 
   return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
-        <CardTitle>Review · document #{docId}</CardTitle>
-        <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose}>
-          <X />
-        </Button>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/* left: document — parsed text with char highlight, or image with bbox overlays */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-1">
+    <Card className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+      <CardContent className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="truncate text-base font-semibold tracking-tight">
+            Reviewing · <span className="font-normal text-muted-foreground">{name}</span>
+          </h2>
+          <Button
+            size="sm"
+            variant={verified ? "outline" : "default"}
+            className={cn("shrink-0", verified && "border-success/50 text-success")}
+            aria-pressed={verified}
+            disabled={actions.verify.isPending || actions.unverify.isPending}
+            onClick={onVerifyToggle}
+          >
+            <Check className="size-4" />
+            {verified ? "Verified" : "Verify"}
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[360px_1fr]">
+          {/* left: facts as editable form cards + verify */}
+          <div className="flex min-h-0 flex-col gap-3">
+            <div className="flex shrink-0 items-center justify-between">
+              <h3 className="text-sm font-semibold">Facts{facts.data ? ` (${facts.data.length})` : ""}</h3>
+              <Button variant="outline" size="sm" className="h-8" onClick={openAdd}>
+                <Plus className="size-4" /> Add fact
+              </Button>
+            </div>
+            <ul className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
+              {facts.data?.map((f) => (
+                <FactCard
+                  key={f.id}
+                  fact={f}
+                  active={active?.id === f.id}
+                  saving={actions.editFact.isPending}
+                  showNotLocated={docView === "image" && !f.provenance.bbox}
+                  onSelect={() => setActive(f)}
+                  onSave={(payload) =>
+                    actions.editFact.mutate({ id: f.id, payload }, { onSuccess: () => toast.success("Fact updated") })
+                  }
+                  onApprove={() => {
+                    const undo = f.status === "approved";
+                    actions.editFact.mutate(
+                      { id: f.id, status: undo ? "staged" : "approved" },
+                      { onSuccess: () => toast.success(undo ? "Approval undone" : "Approved") },
+                    );
+                  }}
+                  onReject={() => {
+                    const undo = f.status === "rejected";
+                    actions.editFact.mutate(
+                      { id: f.id, status: undo ? "staged" : "rejected" },
+                      { onSuccess: () => toast.success(undo ? "Rejection undone" : "Rejected") },
+                    );
+                  }}
+                />
+              ))}
+              {facts.data && facts.data.length === 0 && (
+                <li className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {extracting && <Loader2 className="size-3 animate-spin" />}
+                  {extracting ? "Extracting facts…" : "No facts."}
+                </li>
+              )}
+            </ul>
+          </div>
+
+          {/* right: document — image with bbox overlays (default) or parsed text */}
+          <div className="flex min-h-0 flex-col gap-2">
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                variant={docView === "image" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7"
+                onClick={() => setDocView("image")}
+              >
+                <ImageIcon className="size-3.5" />
+                Document
+              </Button>
               <Button
                 variant={docView === "text" ? "secondary" : "ghost"}
                 size="sm"
@@ -299,15 +542,6 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
               >
                 <FileText className="size-3.5" />
                 Text
-              </Button>
-              <Button
-                variant={docView === "image" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7"
-                onClick={showImage}
-              >
-                <ImageIcon className="size-3.5" />
-                Document
               </Button>
             </div>
 
@@ -320,7 +554,7 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
                 onPick={setActive}
               />
             ) : (
-              <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-relaxed">
+              <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs leading-relaxed">
                 {Array.isArray(highlighted) ? (
                   <>
                     {highlighted[0]}
@@ -332,21 +566,23 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
                 )}
               </pre>
             )}
+          </div>
+        </div>
 
-            <div className="space-y-2 rounded-md border p-3">
-              <Label>Add a fact</Label>
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  className="w-56"
-                  value={newSnippet}
-                  onChange={(e) => setNewSnippet(e.target.value)}
-                  placeholder="snippet (exact text)"
-                />
-                <Button variant="outline" size="sm" onClick={useSelection}>
-                  Use selection
-                </Button>
+        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add a fact</DialogTitle>
+              <DialogDescription>
+                Manually add a fact grounded in a verbatim snippet from the document.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
+                <Label>Type</Label>
                 <Select value={newDomain} onValueChange={(v) => setNewDomain(v ?? "labs")}>
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -358,122 +594,48 @@ export function ReviewPanel({ docId, onClose }: { docId: number; onClose: () => 
                   </SelectContent>
                 </Select>
               </div>
-              <Textarea
-                className="h-16 font-mono text-xs"
-                value={newPayload}
-                onChange={(e) => setNewPayload(e.target.value)}
-              />
-              <Button size="sm" onClick={addFact}>
+
+              <div className="grid grid-cols-[6rem_1fr] items-start gap-2">
+                <Label className="pt-2">Snippet</Label>
+                <div className="space-y-1.5">
+                  <Input
+                    value={newSnippet}
+                    onChange={(e) => setNewSnippet(e.target.value)}
+                    placeholder="exact text from the document"
+                  />
+                  <Button variant="outline" size="sm" onClick={useSelection}>
+                    Use selection
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 border-t pt-3">
+                {Object.entries(newFields).map(([key, value]) => (
+                  <div key={key} className="grid grid-cols-[6rem_1fr] items-center gap-2">
+                    <Label htmlFor={`new-${key}`} className="truncate text-xs font-normal text-muted-foreground">
+                      {key}
+                    </Label>
+                    <Input
+                      id={`new-${key}`}
+                      className="h-8"
+                      value={value}
+                      onChange={(e) => setNewFields((s) => ({ ...s, [key]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAddOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={addFact} disabled={actions.addFact.isPending || !newSnippet.trim()}>
                 Add fact
               </Button>
-            </div>
-          </div>
-
-          {/* right: facts */}
-          <div className="space-y-3">
-            <ul className="space-y-1.5">
-              {facts.data?.map((f) => {
-                const sb = statusBadge(f.status);
-                return (
-                  <li
-                    key={f.id}
-                    onClick={() => setActive(f)}
-                    className={cn(
-                      "cursor-pointer rounded-md border p-2 text-xs transition-colors hover:border-warning/60",
-                      active?.id === f.id && "border-warning ring-1 ring-warning/40",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <Badge variant="secondary">{f.domain || f.extractor_key}</Badge>
-                        <Badge variant={sb.variant} className={sb.className}>
-                          {f.status}
-                        </Badge>
-                        {docView === "image" && !f.provenance.bbox && (
-                          <span className="text-[10px] text-muted-foreground">not located</span>
-                        )}
-                      </div>
-                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 text-success"
-                          aria-label="Approve"
-                          onClick={() =>
-                            actions.editFact.mutate({ id: f.id, status: "approved" }, { onSuccess: () => toast.success("Approved") })
-                          }
-                        >
-                          <Check />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 text-destructive"
-                          aria-label="Reject"
-                          onClick={() =>
-                            actions.editFact.mutate({ id: f.id, status: "rejected" }, { onSuccess: () => toast.success("Rejected") })
-                          }
-                        >
-                          <X />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          aria-label="Edit"
-                          onClick={() => {
-                            setEditId(f.id);
-                            setEditJson(JSON.stringify(f.payload, null, 0));
-                          }}
-                        >
-                          <Pencil />
-                        </Button>
-                      </div>
-                    </div>
-                    {editId === f.id ? (
-                      <div className="mt-2 space-y-1.5" onClick={(e) => e.stopPropagation()}>
-                        <Textarea
-                          className="h-16 font-mono text-xs"
-                          value={editJson}
-                          onChange={(e) => setEditJson(e.target.value)}
-                        />
-                        <Button variant="outline" size="sm" onClick={() => saveEdit(f)}>
-                          Save
-                        </Button>
-                      </div>
-                    ) : (
-                      <code className="mt-1 block break-all text-muted-foreground">
-                        {JSON.stringify(f.payload)}
-                      </code>
-                    )}
-                  </li>
-                );
-              })}
-              {facts.data && facts.data.length === 0 && (
-                <li className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  {extracting && <Loader2 className="size-3 animate-spin" />}
-                  {extracting ? "Extracting facts…" : "No facts."}
-                </li>
-              )}
-            </ul>
-
-            <div className="flex items-center gap-2 border-t pt-3">
-              <Select value={category} onValueChange={(v) => setCategory(v ?? "labs")}>
-                <SelectTrigger className="w-44">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button onClick={onVerify}>Verify document</Button>
-            </div>
-          </div>
-        </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
