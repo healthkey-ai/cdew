@@ -10,7 +10,7 @@ export function ReviewDocumentPage() {
   const id = Number(docId);
   if (!id) return null;
   return (
-    <section className="space-y-3 lg:flex lg:h-[calc(100dvh-6rem)] lg:flex-col lg:gap-3 lg:space-y-0">
+    <section className="space-y-6 lg:flex lg:h-[calc(100dvh-6rem)] lg:flex-col lg:gap-6 lg:space-y-0">
       <Link
         to="/review"
         className="inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
