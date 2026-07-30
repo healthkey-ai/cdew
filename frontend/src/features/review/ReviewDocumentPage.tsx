@@ -1,8 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 
-import { useDocument } from "@/features/documents/api";
-
 import { ReviewPanel } from "./ReviewPanel";
 
 /** Route wrapper for the interactive review surface (design §6/§9): mounts the
@@ -10,9 +8,7 @@ import { ReviewPanel } from "./ReviewPanel";
 export function ReviewDocumentPage() {
   const { docId } = useParams();
   const id = Number(docId);
-  const doc = useDocument(id || null);
   if (!id) return null;
-  const name = doc.data?.original_filename || `Document #${id}`;
   return (
     <section className="space-y-3">
       <Link
@@ -22,7 +18,7 @@ export function ReviewDocumentPage() {
         <ArrowLeft className="size-4 shrink-0" />
         Review list
       </Link>
-      <ReviewPanel docId={id} name={name} />
+      <ReviewPanel docId={id} />
     </section>
   );
 }

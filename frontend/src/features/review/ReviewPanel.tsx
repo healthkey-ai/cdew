@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   type ExtractionRecord,
   type Geometry,
+  useDocument,
   useDocumentExtractions,
   useDocumentText,
   useGeometry,
@@ -300,13 +301,15 @@ function FactCard({
 
 /** Phase 6 Review UI (design §6): the document (image with bbox overlays by
  * default, or parsed text) beside per-fact editable form cards; verify. */
-export function ReviewPanel({ docId, name }: { docId: number; name: string }) {
+export function ReviewPanel({ docId }: { docId: number }) {
+  const doc = useDocument(docId);
   const text = useDocumentText(docId);
   const facts = useDocumentExtractions(docId);
   const actions = useReviewActions(docId);
+  const name = doc.data?.original_filename || `Document #${docId}`;
+  const verified = doc.data?.verified ?? false;
 
   const [active, setActive] = useState<ExtractionRecord | null>(null);
-  const [category, setCategory] = useState("labs");
 
   // Document view: the image with bbox overlays (default, #70) or the parsed text.
   const [docView, setDocView] = useState<"image" | "text">("image");
@@ -406,8 +409,12 @@ export function ReviewPanel({ docId, name }: { docId: number; name: string }) {
     );
   };
 
-  const onVerify = () => {
-    actions.verify.mutate(category, {
+  const onVerifyToggle = () => {
+    if (verified) {
+      actions.unverify.mutate(undefined, { onSuccess: () => toast.success("Verification undone") });
+      return;
+    }
+    actions.verify.mutate(undefined, {
       onSuccess: () => toast.success("Document verified"),
       onError: (err) => {
         const status = (err as { response?: { status?: number } }).response?.status;
@@ -419,9 +426,22 @@ export function ReviewPanel({ docId, name }: { docId: number; name: string }) {
   return (
     <Card>
       <CardContent>
-        <h2 className="mb-3 text-base font-semibold tracking-tight">
-          Reviewing · <span className="font-normal text-muted-foreground">{name}</span>
-        </h2>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="truncate text-base font-semibold tracking-tight">
+            Reviewing · <span className="font-normal text-muted-foreground">{name}</span>
+          </h2>
+          <Button
+            size="sm"
+            variant={verified ? "outline" : "default"}
+            className={cn("shrink-0", verified && "border-success/50 text-success")}
+            aria-pressed={verified}
+            disabled={actions.verify.isPending || actions.unverify.isPending}
+            onClick={onVerifyToggle}
+          >
+            <Check className="size-4" />
+            {verified ? "Verified" : "Verify"}
+          </Button>
+        </div>
         <div className="grid grid-cols-1 gap-4 lg:h-[calc(100vh-15rem)] lg:grid-cols-[360px_1fr]">
           {/* left: facts as editable form cards + verify */}
           <div className="flex min-h-0 flex-col gap-3">
@@ -466,22 +486,6 @@ export function ReviewPanel({ docId, name }: { docId: number; name: string }) {
                 </li>
               )}
             </ul>
-
-            <div className="flex shrink-0 items-center gap-2 border-t pt-3">
-              <Select value={category} onValueChange={(v) => setCategory(v ?? "labs")}>
-                <SelectTrigger className="w-36">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button onClick={onVerify}>Verify</Button>
-            </div>
           </div>
 
           {/* right: document — image with bbox overlays (default) or parsed text */}

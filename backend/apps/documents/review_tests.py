@@ -114,3 +114,13 @@ class ReviewApiTests(APITestCase):
         f.status = ExtractionStatus.FLAGGED
         f.save(update_fields=["status"])
         assert self.client.post(f"/api/v1/documents/{self.doc.id}/verify/", {}, format="json").status_code == 409
+
+    def test_unverify_clears_the_stamp(self):
+        rec = self._staged_fact()
+        self.client.patch(f"/api/v1/extractions/{rec.id}/", {"status": "approved"}, format="json")
+        assert self.client.post(f"/api/v1/documents/{self.doc.id}/verify/", {}, format="json").json()["verified"] is True
+        # toggle off — no gate, clears the stamp
+        undone = self.client.post(f"/api/v1/documents/{self.doc.id}/unverify/", {}, format="json")
+        assert undone.status_code == 200 and undone.json()["verified"] is False
+        self.doc.refresh_from_db()
+        assert self.doc.verified_at is None and self.doc.verified_by is None
