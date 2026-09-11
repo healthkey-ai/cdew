@@ -71,7 +71,7 @@ finding applies only within the assay's tested scope and detection limits.
 
 This separation follows the
 [HL7 Genomics Reporting overview](https://www.hl7.org/fhir/uv/genomics-reporting/STU3/general.html)
-and [variant reporting guidance](https://www.hl7.org/fhir/uv/genomics-reporting/STU3/variant.html).
+and [variant reporting guidance](https://www.hl7.org/fhir/uv/genomics-reporting/STU3/sequencing.html).
 It is not a claim of complete FHIR profile conformance by either application.
 
 ## Commit contract and release gates
