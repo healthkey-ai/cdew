@@ -8,6 +8,12 @@
 > types in a single pass); and make the commit-to-promop step (M5, #34–#38) mostly
 > mechanical.
 
+> **Genomics review, 2026-09-11:** The proposed `genomic_variant` contract
+> supersedes the original gene-plus-origin example. See
+> [Genomics integration](genomics-integration.md) for attributes, report context,
+> transport and release gates. This aligns with PRomop's in-progress Genomics
+> work; it is not a claim of deployed API support.
+
 Related: design §3 (extraction), §8 (prompt/schema registry), §9 (provenance),
 §10 (LLM layer), `docs/schema-lint.md`; issues #34–#38 (commit phase), #26/#27
 (authoring UI).
@@ -22,7 +28,8 @@ are synced from promop (the OMOP domains) into a catalog of JSON definitions, an
 **extractor** is a prompt *composed* from a **set** of object types (user's choice —
 one or many), and extraction emits a **tagged union** of facts
 (`{object_type, data, provenance}`). At commit, each fact's `object_type` maps to a
-FHIR resource; we POST a bundle and let promop code + dedup.
+FHIR resource for base objects. Genomic findings use a specialized source-value
+adapter: PRomop owns coding and linked Measurement/Observation writes.
 
 ```
 promop OpenAPI ──sync──▶ Object catalog (JSON definitions)
@@ -61,8 +68,9 @@ Two invariants carry over unchanged from design §3/§10:
 ## 2. What promop actually provides (verified inventory)
 
 promop is a Django/DRF app on the **OMOP CDM** (`FHIR R4 → OMOP tables → derived
-read-model`). `PatientRecord`/`PatientInfo` is read-only and auto-derived; all writes land
-in OMOP tables. Cited files under `/Users/vtrv101/Projects/ht-hk/promop`.
+read-model`). `PatientRecord`/`PatientInfo` is auto-derived. Supported named-field
+PATCH commands write through to OMOP and refresh the projection; they are not
+arbitrary clinical JSON writes. Cited files under `/Users/vtrv101/Projects/ht-hk/promop`.
 
 ### 2.1 Object types (the write-target OMOP tables)
 Granular CRUD at `/api/v1/…` (serializers in `patient_portal/api/serializers.py`; models in
@@ -70,7 +78,7 @@ Granular CRUD at `/api/v1/…` (serializers in `patient_portal/api/serializers.p
 
 | CDEW object type | promop endpoint | OMOP table | FHIR resource in | Holds |
 |---|---|---|---|---|
-| `measurement` | `/api/v1/measurements/` | `measurement` | Observation / DiagnosticReport | labs, vitals, biomarkers, **genetic mutations** |
+| `measurement` | `/api/v1/measurements/` | `measurement` | Observation / DiagnosticReport | labs, vitals, biomarkers; structured variants use §3.4 |
 | `condition` | `/api/v1/conditions/` | `condition_occurrence` | Condition | diagnoses |
 | `drug` | `/api/v1/drug-exposures/` | `drug_exposure` | MedicationStatement/Request, Immunization | meds, therapies, vaccines |
 | `procedure` | `/api/v1/procedures/` | `procedure_occurrence` | Procedure | procedures |
@@ -78,9 +86,10 @@ Granular CRUD at `/api/v1/…` (serializers in `patient_portal/api/serializers.p
 | `episode` | `/api/v1/episodes/` | `episode` (oncology) | (derived from meds) | lines of therapy |
 | `episode_event` | `/api/v1/episode-events/` | `episode_event` | (derived) | links a fact to an episode |
 
-Genomics has **no** separate models — genetic mutations live in `measurement`
-(`value_as_string` = HGVS, `value_as_concept` = interpretation, `qualifier_concept` =
-germline/somatic). Non-clinical: `PatientDocument` (`/api/v1/documents/`),
+The Genomics implementation uses one parent Measurement per finding with linked
+Measurement/Observation attributes and approved field mappings. Legacy qualifier
+encodings remain readable but are not the new write contract. Named priority
+fields such as `genomics_brca1` are list projections, not independent facts. Non-clinical: `PatientDocument` (`/api/v1/documents/`),
 `PatientTrialEnrollment`.
 
 ### 2.2 Every field is **coded** or **source/raw**
@@ -105,20 +114,26 @@ classification; CDEW adds its own where promop is thin (`office_visit`,
 `immunohistochemistry`, …). `/api/v1/documents/` is blob storage and has **no FK to the
 facts it produced**.
 
-### 2.4 Write path — two families
+### 2.4 Write paths
 - **FHIR bundle ingest** (`POST /api/v1/fhir/sync/`, and `/patient-records/upload_fhir/`):
-  accepts a FHIR R4 Bundle, **resolves source→concept (codes)**, and is **idempotent**
-  (`FhirSyncView._upsert_clinical` dedups on `(source_value, date)`; upgrades concepts in
-  place; collapses duplicates). Resource→table map: `Observation→measurement`,
+  accepts a FHIR R4 Bundle and **resolves source→concept (codes)**. Deduplication
+  is path-specific: `_upsert_clinical` uses source/date; discrete Observations use
+  date/datetime, concept/source and numeric value, **not variant text or
+  report/specimen identity**. It is unsafe for same-gene qualitative variants. Resource→table map: `Observation→measurement`,
   `Condition→condition`, `MedicationStatement/Request→drug`, `Procedure→procedure`,
   `AllergyIntolerance→observation`, `DiagnosticReport→observation`, `Immunization→drug`;
   `upload_fhir` also derives `episode`/`episode_event` from meds.
 - **Granular OMOP CRUD** (`POST /api/v1/conditions/` …): expects **integer concept_ids**,
   does **not** code, and a plain POST **inserts (no upsert)** — idempotency is the caller's job.
+- **Specialized Genomics API** (in progress): accepts source attributes, uses
+  approved mappings, writes linked facts atomically and refreshes PatientRecord.
+  CDEW does not code concepts. A plain create still is **not an idempotent import**;
+  see the [receiving gates](genomics-integration.md#commit-contract-and-release-gates).
 
 **Implication:** committing via **FHIR bundles** means promop owns coding + dedup → CDEW
 never resolves LOINC/SNOMED/RxNorm itself. This absorbs / shrinks #33 (LOINC) and #34
 (SNOMED/RxNorm/UCUM), and simplifies #36 (reconcile) and #35 (write path).
+This applies to supported base objects, not arbitrary FHIR components or genomic graphs.
 
 ### 2.5 Provenance, identity, tenancy
 - **Provenance**: `ProvenanceRecord` — a generic FK to any OMOP fact, with a `source` enum
@@ -142,7 +157,7 @@ from promop's OpenAPI schema — **not author-editable**. Shape:
 {
   "key": "measurement",              // stable id, used as the facts[] discriminator
   "label": "Measurement / lab result",
-  "description": "A single quantitative or qualitative result: labs, vitals, biomarkers, genetic mutations.",
+  "description": "A single quantitative or qualitative result: labs, vitals, biomarkers. Structured variants use genomic_variant.",
   "omop_target": "measurement",      // promop table (commit routing)
   "fhir_resource": "Observation",    // resource the commit bundle emits
   "source_schema": {                 // JSON Schema of the source/raw subset (see 3.2)
@@ -171,14 +186,14 @@ to fill (promop's coder owns everything else — §2.2/§2.4). Dropped categorie
 `is_erroneous`/`erroneous_reason`, and `*_datetime` twins (CDEW extracts dates;
 time-of-day is rarely in documents and never required).
 
-### 3.3 The v1 catalog (five objects, JSON definitions)
+### 3.3 Base catalog (five objects; Genomics adds a logical object)
 
 Field lists below are taken from promop's serializers
 (`patient_portal/api/serializers.py`) with the §3.2 filter applied. `required`
 reflects promop's write requirements on the source subset: the primary
 `*_source_value` plus the anchor date.
 
-#### `measurement` — labs, vitals, biomarkers, genetic mutations
+#### `measurement` — labs, vitals, biomarkers (variants use §3.4)
 
 ```json
 {
@@ -187,7 +202,7 @@ reflects promop's write requirements on the source subset: the primary
     "measurement_source_value": { "type": "string", "description": "Test/analyte name as written" },
     "measurement_date":         { "type": "string", "format": "date" },
     "value_as_number":          { "type": "number" },
-    "value_as_string":          { "type": "string", "description": "Qualitative result, or HGVS variant for mutations" },
+    "value_as_string":          { "type": "string", "description": "Qualitative result; structured variants use genomic_variant" },
     "value_source_value":       { "type": "string", "description": "Raw value text incl. operators, e.g. '<0.5'" },
     "unit_source_value":        { "type": "string" },
     "range_low":                { "type": "number" },
@@ -279,10 +294,21 @@ later without changes.
 **Note on required dates.** `measurement_date` is hard-required by promop; the other
 dates are required at *commit* but a document may genuinely lack them. Rule: the
 extraction schema requires only what the document can always supply
-(`*_source_value` + measurement's date); missing commit-required dates surface as a
+(`*_source_value`; relax the measurement extraction-only schema above if undated
+results must be retained); missing commit-required dates surface as a
 review-time warning (the reviewer supplies or approves without commit), not as an
 extraction validation failure. This keeps the §3 hard rule about provenance strict
 while not forcing the LLM to invent dates.
+
+### 3.4 Genomics object and report context
+
+Add `genomic_variant`: one source finding containing gene, separate DNA/protein
+changes, origin, interpretation, VAF, reference sequences and provenance attributes.
+It spans OMOP domains: use `commit_adapter: "genomics"` and
+`omop_targets: ["measurement", "observation"]`, not a one-table assumption.
+The [attribute contract](genomics-integration.md#variant-attributes) distinguishes
+current API keys from proposed report/assay extensions. Preserve report context
+even when there are **no detected variants**.
 
 ---
 
@@ -290,7 +316,7 @@ while not forcing the LLM to invent dates.
 
 ### 4.1 New: `ObjectType` (synced from promop, not author-editable)
 One row per promop object type (`measurement`, `condition`, `drug`, `procedure`,
-`observation`, and later `episode`), holding the JSON definition of §3.1: `key`,
+`observation`, `genomic_variant`, and later `episode`), holding the JSON definition of §3.1: `key`,
 `label`, `omop_target`, `fhir_resource`, the **`source_schema`** (JSON Schema of the
 source/raw subset + required fields) derived from promop, plus `field_guide` and
 `default_guidance`. Synced by a management command (§5).
@@ -315,7 +341,7 @@ A fact that can't be validated against its declared object type's schema (or lac
 provenance) fails validation and is retried — same §3 hard rule, now per object type.
 
 ### 4.4 Changed: `ExtractionRecord`
-Add `object_type` (the promop target, the facts[] discriminator). `domain` becomes
+Add `object_type` (the logical facts[] discriminator, potentially spanning OMOP domains). `domain` becomes
 derived (or dropped). Provenance (char-span/bbox/snippet) unchanged — CDEW remains
 the provenance authority (§2.5).
 
@@ -333,6 +359,11 @@ command `sync_object_types`:
 2. For each OMOP CRUD serializer, take the **source/raw field subset** (per §3.2)
    → a JSON Schema per object type, with promop's required-ness for the source fields.
 3. Upsert `ObjectType` rows; record the promop schema version/date for the snapshot.
+
+For Genomics, use an explicitly published action schema, not the intersection of
+generic Measurement/Observation fields. Until it exists, pin a reviewed captured
+contract fixture and disable live genomic commit. Omission of custom actions from
+OpenAPI is not permission to drop fields. Catalog availability is not write readiness.
 
 Decoupled (no shared Python package), versioned, and offline-testable with a captured
 schema fixture (keeps CI hermetic — mirrors how we double the LLM).
@@ -365,8 +396,8 @@ Examples of author intent this supports:
 - a **"Labs" extractor**: `["measurement"]`, triggered by `LAB_RESULTS`;
 - an **"Office visit" extractor**: `["condition", "drug", "procedure",
   "observation"]`, triggered by `office_visit` — one LLM pass, heterogeneous facts;
-- an **"NGS report" extractor**: `["measurement", "observation"]` with
-  mutation-specific guidance, triggered by `NGS`.
+- an **"NGS report" extractor**: `["genomic_variant", "measurement"]` with
+  variant guidance and separate assay biomarkers, triggered by `NGS`.
 
 ### 6.2 Ad-hoc extraction (secondary — any permitted user, per document)
 
@@ -448,9 +479,9 @@ prompt; out of scope for v1.)
 
 ---
 
-## 8. Commit to promop (M5) — recommended: FHIR-bundle path
+## 8. Commit to promop (M5) — FHIR for base objects; Genomics adapter
 
-For a verified document:
+For supported non-genomic facts of a verified document:
 1. **Resolve patient**: CDEW `patient_ref` → promop `person_id` (via `persons/find_or_create`
    using the patient's actor identity, or an explicit CDEW→promop mapping — **open Q**).
 2. **Build a FHIR R4 Bundle**: map each approved fact's `object_type` + source values →
@@ -470,6 +501,12 @@ promop's.
 
 **Alternative (rejected for v1):** granular OMOP CRUD — gives CDEW control but forces CDEW to
 resolve concept_ids (own coding) and own idempotency; more work, more drift.
+
+**Genomics exception:** use the specialized source-value API, not generic FHIR or
+raw OMOP CRUD. Require idempotency/reconciliation, document provenance, explicit
+date semantics and a deployed versioned schema. Until then hold the **whole finding**,
+not just origin. Mixed documents show per-fact committed/held state. Full contract:
+[Genomics integration](genomics-integration.md#commit-contract-and-release-gates).
 
 ---
 
@@ -556,32 +593,41 @@ Author creates **"Office visit"**: selects `condition`, `drug`, `procedure`,
    Procedure, and Observation resources → `POST /api/v1/fhir/sync/`; the response's
    per-type OMOP ids land back on the records as `promop_ref`.
 
-### 10.3 NGS report → guidance-shaped extraction (mutations)
+### 10.3 NGS report → structured finding with linked attributes
 
-Author creates **"NGS report"**: selects `measurement` + `observation`; adds
-measurement guidance *"one fact per reported variant: gene in
-`measurement_source_value`, HGVS in `value_as_string`; put germline/somatic origin
-in a separate observation fact"*; triggers on `NGS`; publishes.
+Author creates **"NGS report"**: selects `genomic_variant` (plus `measurement`
+for assay biomarkers); guidance: *"one object per finding; keep gene, DNA/protein
+changes, origin, interpretation and sample VAF together. Copy only stated values.
+Do not infer origin from VAF or negative findings from an empty gene list."*
+Trigger: `NGS`; publish a pinned receiving-contract snapshot.
 
 1. An NGS PDF is uploaded → parsed → classified `NGS` → routed.
-2. A reported variant becomes a pair of facts:
+2. One finding retains the previously omitted pathogenicity and VAF. This synthetic
+   snippet contains no date or transcript accession; neither is invented.
 
 ```json
 { "facts": [
-  { "object_type": "measurement",
-    "data": { "measurement_source_value": "KRAS", "measurement_date": "2026-07-30",
-              "value_as_string": "c.35G>A (p.G12D)" },
-    "provenance": { "char_start": 1502, "char_end": 1541, "snippet": "KRAS c.35G>A (p.G12D) — pathogenic" } },
-  { "object_type": "observation",
-    "data": { "observation_source_value": "KRAS variant origin", "observation_date": "2026-07-30",
-              "qualifier_source_value": "somatic" },
-    "provenance": { "char_start": 1542, "char_end": 1560, "snippet": "somatic, VAF 31%" } }
+  { "object_type": "genomic_variant",
+    "data": { "gene": "KRAS", "variant": "c.35G>A",
+              "amino_acid_change": "p.G12D", "interpretation": "pathogenic",
+              "origin": "somatic", "allelic_frequency": 31,
+              "allelic_frequency_unit": "%",
+              "variant_description": "KRAS c.35G>A (p.G12D) — pathogenic; somatic, VAF 31%" },
+    "provenance": { "char_start": 1502, "char_end": 1554,
+                    "snippet": "KRAS c.35G>A (p.G12D) — pathogenic; somatic, VAF 31%" } }
 ] }
 ```
 
-3. Reviewer verifies both; on commit the variant measurement goes in the bundle,
-   while **origin is withheld** until promop maps it to
-   `measurement.qualifier_concept` (§12a-a) — CDEW keeps it reviewed and stored.
+3. Reviewer verifies the complete finding and separate report/specimen/date evidence.
+   Missing commit-required dates hold the finding; never substitute today's date.
+4. Once receiver gates pass, the Genomics adapter commits the complete finding.
+   PRomop resolves approved mappings, links components and refreshes the general
+   list plus `genomics_kras`. Store the returned parent Measurement ID for
+   corrections/retractions. CDEW must not invent a Measurement source code of "KRAS".
+5. Two KRAS findings on one date and repeated results in different specimens remain
+   distinct. Origin is neither an unlinked observation nor withheld separately.
+   Test long text, zero/percent/fraction VAF, missing dates, negative/no-call results,
+   report amendments and retry-after-timeout.
 
 ### 10.4 Validation failure → retry, never staged dirty
 
@@ -629,6 +675,9 @@ its header. From the document page they ad-hoc-select `observation` and run:
 - **P4 — Lint migration.** Replace REGISTRY with synced schemas; keep the shape-lint codes.
 - **P5 — Commit (M5).** FHIR-bundle builder + person resolution + provenance + `PatientDocument`
   → folds/# supersedes parts of #33 #34 #35 #36; #37 gate from promop; #38 UI.
+- **P5g — Genomics integration.** Versioned genomic_variant object, report-only
+  staging, specialized adapter, idempotency/provenance gates and §10.3 round-trip
+  tests. Enable live commit only after matching receiver capabilities are deployed.
 - **Ad-hoc extraction** (§6.2): after P2 — needs only the composer + a transient-version
   wrapper; UI entry from the document page.
 - **Authoring UI** (#26/#27): pick object types from the synced registry + per-attribute
@@ -638,8 +687,9 @@ its header. From the document page they ad-hoc-select `observation` and run:
 
 ## 12. Decisions (confirmed)
 
-1. **Commit strategy — FHIR bundle.** CDEW sends source values in a FHIR R4 bundle; promop
-   codes + dedups. #33/#34 shrink into promop; #35 = bundle-builder.
+1. **Commit strategy — FHIR for base objects; proposed specialized Genomics adapter
+   for variants.** PRomop owns coding. Genomics transport, identity and provenance
+   require receiving-capability gates. #35 includes adapter routing.
 2. **`patient_ref` → `person_id` — OIDC actor identity.** Resolve via
    `POST /api/v1/persons/find_or_create/` with the patient's `actor_iss`+`actor_sub`; org from
    the token. CDEW documents must carry (or resolve to) the patient's OIDC identity at commit.
@@ -650,18 +700,13 @@ its header. From the document page they ad-hoc-select `observation` and run:
 
 ### 12a. promop-side items (from code review)
 
-**(a) Genetic-mutation *origin* is not writable via either path — narrow gap, defer.**
-Mutations live in `measurement`: `value_as_string`=HGVS variant, `value_as_concept`=interpretation
-(SNOMED), **`qualifier_concept`=origin** (germline 255395001 / somatic 255461003)
-(`GENETIC_MUTATIONS_IMPLEMENTATION.md`). But the **CRUD `MeasurementSerializer` omits
-`qualifier_concept`**, and the **FHIR measurement ingest** (`fhir/sync.py::_ingest_observations`)
-sets `value_as_string` but **does not map origin → `qualifier_concept`** (qualifier is only used
-for allergy tagging on the observation path). So via our FHIR commit CDEW can send gene + variant +
-interpretation, but promop won't persist **origin**.
-→ **Plan:** CDEW still *extracts + reviews* origin (captured on its own record); just don't send it
-on commit until promop supports it. **Ask promop team** to map a FHIR genetic Observation
-component → `measurement.qualifier_concept` (or expose it on the serializer). Not a blocker for
-labs/conditions/drugs/procedures/observations or for variant/interpretation.
+**(a) Genomics needs a complete import contract, not an origin-qualifier patch.**
+The Genomics writer handles origin and interpretation as linked attributes.
+`GENETIC_MUTATIONS_IMPLEMENTATION.md` describes the historical encoding; use
+PRomop's `genomics_architecture.md` and a deployed action schema. Request versioned
+schema, source-finding reconciliation and document provenance before enabling
+CDEW commit. Hold the whole finding until then; other base objects are not blocked.
+Valid FHIR components/report references do not imply PRomop ingests that graph.
 
 **(b) No fact→source-document FK in promop — not needed; CDEW owns the mapping.**
 The commit responses **return the created OMOP ids** per type (`upload_fhir`/`sync` return
@@ -670,8 +715,11 @@ back on each `ExtractionRecord` → an authoritative **document → promop-fact*
 (consistent with decision #3). Correction/retraction uses that map + soft-delete
 (`PATCH is_erroneous=true`). Multi-source facts are already handled promop-side
 (`MeasurementOwnership`); a single FK couldn't model the many-to-many anyway.
-→ **Plan:** add a small `promop_ref` (object_type + id) on `ExtractionRecord`, captured from the
-commit response. Optionally stamp `ProvenanceRecord.modification_reason` with the CDEW doc id as a
+→ **Plan:** add `promop_ref` (adapter + physical parent table + id) on
+`ExtractionRecord`; for genomic_variant use the parent Measurement ID and
+specialized DELETE so components are retracted too. Do not infer input/output
+correspondence from returned batch list order: rows can be skipped/deduplicated.
+Require per-source-fact response correlation or explicit reconciliation. Optionally stamp `ProvenanceRecord.modification_reason` with the CDEW doc id as a
 human breadcrumb (no promop schema change). **No promop FK requested.**
 
 ---
@@ -680,7 +728,7 @@ human breadcrumb (no promop schema change). **No promop FK requested.**
 
 1. **Ad-hoc permissions** — reviewer role, or prompt-author only? (Leaning:
    reviewer may run ad-hoc; only authors create reusable extractors.)
-2. **Extra CDEW-only fields** (e.g. mutation *origin*, §12a-a): confirm the
+2. **Extra CDEW-only fields** (e.g. proposed report/assay metadata): confirm the
    validation rule for author-added fields on top of a synced schema — namespace
    them (`x_*`?) so a future promop sync can never collide.
 3. **Catalog resync vs. published versions** — resync only creates new snapshots for
@@ -689,3 +737,7 @@ human breadcrumb (no promop schema change). **No promop FK requested.**
 4. **Per-object model override** — is model/params per extractor (as today) enough,
    or will any object type warrant its own model? (Leaning: per extractor is enough
    for v1.)
+
+5. **Genomics experts:** confirm report/version identity, assay coverage/limits,
+   negative-result scope, structural findings and classification versus actionability.
+   See [detailed questions](genomics-integration.md#expert-review-questions).
