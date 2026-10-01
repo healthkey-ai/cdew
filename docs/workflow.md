@@ -41,7 +41,7 @@ flowchart TD
     REVIEW["<b>Review UI</b> — click-a-fact → highlight source<br/>verify · correct · add missing facts · categorize doc"]
     APPROVED["approved — v1 terminal state"]
     REJECTED["rejected"]
-    PROMOP["<i>later phase</i> — commit as FHIR R4 bundle<br/>source values only → promop /api/v1/fhir/sync/<br/>promop codes (LOINC/SNOMED/RxNorm) + dedups"]
+    PROMOP["<i>later phase</i> — commit to promop<br/>code-mappings/lookup → concept ids (unmapped: held)<br/>bulk upsert per OMOP table · DOCUMENT_EXTRACTION"]
 
     UP --> ING --> JOB --> DISP
     DISP --> LOCAL --> EXEC
