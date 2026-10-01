@@ -28,6 +28,10 @@ Backend (`cd backend`, venv active):
 - `python manage.py bootstrap_dev --email you@x.org --roles admin,prompt_author,reviewer` — creates an Identity + role grants, prints a JWT for local API calls.
 - Real (non-test) runs need Postgres. With no `DATABASE_URL`, Django uses `postgres:///cdew` (local socket, OS user) — `createdb cdew` once. See README for the Docker option.
 
+Full stack in Docker (repo root): `docker compose up -d --build` — frontend :5173, api :8000,
+Prefect UI :4200, worker, Postgres on **:5544** (`cdew` + `prefect` DBs). Backend services read
+`backend/.env`; run Django commands inside via `docker compose exec api python manage.py <cmd>`.
+
 Frontend (`cd frontend`):
 - `npm run dev` — Vite on :5173, proxies `/api` → `:8000` (the proxy resolves IPv4-first because Django's dev server binds IPv4 only).
 - `npm run build` — `tsc -b && vite build`. `npm run lint` — eslint.

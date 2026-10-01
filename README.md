@@ -17,8 +17,50 @@ backend/     Django/DRF/Postgres API + Prefect worker (local: make prefect-worke
     prompts/     schema shape-lint config (domain_contracts.py) — grows in Phase 3–5
 frontend/    Vite + React 19 + TS + Tailwind v4 + shadcn + react-query
 docs/        design.md · implementation-plan.md · schema-lint.md
+docker/      init scripts for the compose Postgres
+docker-compose.yml   full local stack (see below)
 TODO.md      deferred options (geometry OCR, autoscaling, …)
 ```
+
+## Run everything in Docker
+
+The quickest way to a working system. From the repo root:
+
+```bash
+gcloud auth application-default login   # once, on the host — Vertex + DocAI use your ADC
+docker compose up -d --build
+docker compose exec api python manage.py bootstrap_dev \
+  --email you@healthtree.org --roles admin,prompt_author,reviewer   # first run only
+```
+
+| Service | URL |
+|---|---|
+| frontend (Vite, proxies `/api` → api) | http://localhost:5173 |
+| api (Django; migrates on start) | http://localhost:8000 |
+| prefect-server (UI) | http://localhost:4200 |
+| worker (`manage.py prefect_worker`) | — |
+| db (Postgres 16: `cdew` + `prefect`) | localhost:**5544** |
+
+- Backend services read `backend/.env` (LLM, DocAI, pipeline flags); compose overrides only the DB
+  host and Prefect URL, and always dispatches to the Prefect worker (`PREFECT_DISPATCH=deployment`).
+- Code is bind-mounted, so backend and frontend edits reload live. `backend/media` (uploaded
+  originals) is shared by api and worker.
+- The Prefect server reuses the backend image, so its version always matches the worker's.
+- Logs: `docker compose logs -f api worker`. Stop: `docker compose down` (add `-v` to wipe the
+  databases).
+- **Copy an existing local DB in** (replaces the container's `cdew` data):
+
+  ```bash
+  docker compose stop api worker
+  docker compose exec -T db psql -U cdew -d postgres -c "DROP DATABASE cdew;" -c "CREATE DATABASE cdew OWNER cdew;"
+  pg_dump -d cdew --no-owner --no-privileges | grep -v '^SET transaction_timeout' \
+    | docker compose exec -T db psql -U cdew -d cdew -q
+  docker compose start api worker
+  ```
+
+  (The `grep` drops a PG17-only setting the PG16 container rejects.)
+
+To run the pieces natively instead, follow the quickstarts below.
 
 ## Backend — quickstart
 
@@ -55,16 +97,14 @@ If your OS role lacks `CREATEDB`, use a superuser: `createdb -U postgres cdew` (
 
 ### Database — option B: Docker Postgres
 
+Run just the database service from the root compose file (from the repo root):
+
 ```bash
-docker compose up -d db      # postgres on host port 5432
-export DATABASE_URL=postgres://cdew:dev_only_change_in_prod@127.0.0.1:5432/cdew
+docker compose up -d db      # postgres on host port 5544 — no clash with a native 5432
+export DATABASE_URL=postgres://cdew:dev_only_change_in_prod@127.0.0.1:5544/cdew
 ```
 
-⚠️ If you **already** have a native Postgres on 5432 (option A), the container can't bind that port
-and won't be reachable. Either stop the native one, or remap the compose port and point
-`DATABASE_URL` at it, e.g. edit `docker-compose.yml` to `"5544:5432"` then use
-`...@127.0.0.1:5544/cdew`. Use `127.0.0.1` (not `localhost`) so it resolves to the container
-over IPv4.
+Use `127.0.0.1` (not `localhost`) so it resolves to the container over IPv4.
 
 ### Tests / CI
 
