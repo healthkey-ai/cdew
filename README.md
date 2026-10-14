@@ -171,3 +171,8 @@ React shell wired to the API, settings/storage/LLM/env conventions, Docker + CI.
 Standalone service reusing hk-labs patterns. markitdown parsing · Prefect orchestration · gemini via
 Pydantic AI (Vertex in staging/prod, GLA in dev) · hybrid auth (hk-identity + local roles) · v1 stops
 at validated staging (promop commit is a later phase). Details in `docs/design.md` §15.
+
+## License
+
+Copyright 2026 HealthKey. Licensed under the [Apache License, Version 2.0](LICENSE); see also
+[`NOTICE`](NOTICE).
