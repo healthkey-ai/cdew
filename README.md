@@ -174,5 +174,5 @@ at validated staging (promop commit is a later phase). Details in `docs/design.m
 
 ## License
 
-Copyright 2026 HealthKey. Licensed under the [Apache License, Version 2.0](LICENSE); see also
+Copyright 2026 HealthKey, Inc. Licensed under the [Apache License, Version 2.0](LICENSE); see also
 [`NOTICE`](NOTICE).
