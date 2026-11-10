@@ -169,7 +169,7 @@ React shell wired to the API, settings/storage/LLM/env conventions, Docker + CI.
 ## Conventions & stack decisions
 
 Standalone service reusing hk-labs patterns. markitdown parsing · Prefect orchestration · gemini via
-Pydantic AI (Vertex in staging/prod, GLA in dev) · hybrid auth (hk-identity + local roles) · v1 stops
+Pydantic AI (Vertex in staging/prod, GLA in dev) · hybrid auth (staff sign in via promop, phr or Firebase; local roles) · v1 stops
 at validated staging (promop commit is a later phase). Details in `docs/design.md` §15.
 
 ## License

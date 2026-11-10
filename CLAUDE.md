@@ -109,8 +109,8 @@ Vite + React 19 + TS + Tailwind v4 + shadcn + @tanstack/react-query v5. House co
   small (hotfixes, docs, one-liners included). Branch → push → PR → CI green → merge. `dev` and
   `main` are branch-protected (PR-only); **GitHub Actions CI** (backend `ci.sh` + frontend
   build/lint, `.github/workflows/ci.yml`) is a required status check. Merging to `dev` is meant to
-  deploy staging — **the GCP staging env isn't provisioned yet** (see `TODO.md`), so no auto-deploy
-  fires today; still treat a `dev` merge as a staging release.
+  deploy staging — **staging isn't provisioned yet** (planned on Render, independent like PRISM:
+  #31, `TODO.md`), so no auto-deploy fires today; still treat a `dev` merge as a staging release.
 - For simple commit/push/PR, use plain `git`/`gh` directly (not the `/ship` skill).
 - **Working directory is the repo root (`cdew/`)**, which contains `backend/`,
   `frontend/`, and `docs/`. Reference every file by plain **relative path from the root**:

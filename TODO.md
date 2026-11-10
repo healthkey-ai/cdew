@@ -5,40 +5,41 @@ Backlog of intentionally-deferred work, with the trigger that should promote eac
 
 ## Deployment / Ops
 
-### Setup staging on GCP
+### Setup staging on Render (independent, like PRISM)
 
-**Status:** not started · **Priority:** next · **Trigger:** v1 is built (Phases 0–6) and needs a
-shared, PHI-safe environment for the CDM team to exercise. `dev` → **staging**, `main` →
-**production** (later); merging to `dev` should deploy staging. **Nothing is provisioned yet** — the
-repo has the app + a dev-only `docker-compose.yml` and `config/settings/production.py` (TLS hardening),
-but no infra.
+**Status:** not started · **Priority:** next · **Tracked in:** #31 Part C · **Trigger:** v1 is built
+(Phases 0–6) and needs a shared environment for the CDM team. `dev` → **staging**, `main` →
+**production** (later); merging to `dev` should deploy staging after CI. **Nothing is provisioned
+yet.** The repo has the app, a root `docker-compose.yml` and `config/settings/production.py`.
 
-Stand up a HIPAA-aligned staging environment on GCP (BAA-covered services only; no PHI in logs):
+CDEW is a standalone admin app (design §11), so it deploys **on its own, like PRISM**: a
+**`render.yaml` Blueprint in this repo**, not in phr's `infra/`.
 
-- **Database** — Cloud SQL for PostgreSQL (private IP / VPC); `DATABASE_URL` from Secret Manager.
-- **Object storage (PHI)** — a private GCS bucket (uniform bucket-level access, signed URLs) for
-  immutable originals + `PromptTestSample` docs. The `GoogleCloudStorage` backend is already wired
-  (`GS_BUCKET_NAME`, design §2); grant the runtime SA `objectAdmin` on the bucket only.
-- **API runtime** — build the existing `backend/Dockerfile` (gunicorn) → Artifact Registry → **Cloud
-  Run** (simplest for staging; GKE if the Prefect worker pushes us there). `DJANGO_SETTINGS_MODULE=
-  config.settings.production`; `SECRET_KEY`/DB creds from Secret Manager; set `ALLOWED_HOSTS` +
-  `CORS_ALLOWED_ORIGINS`; HTTPS via the platform (`SECURE_PROXY_SSL_HEADER` already set; raise
-  `SECURE_HSTS_SECONDS` once TLS is stable).
-- **Orchestration** — **self-hosted Prefect** control plane + worker (no Prefect Cloud, PHI in-perimeter,
-  design §6). Worker runs with `django.setup()` for ORM access; `PREFECT_DISPATCH=deployment`,
-  `PREFECT_API_URL` → the self-hosted server; register the `extract-document` deployment. Cap gemini
-  fan-out via `PREFECT_GEMINI_CONCURRENCY` (Prefect global concurrency limit tag `gemini`).
-- **LLM** — **Vertex AI** (`GEMINI_BACKEND=vertex`, BAA) via ADC / Workload Identity (`GOOGLE_CLOUD_PROJECT`,
-  `VERTEX_LOCATION`); **no API key** in staging/prod.
-- **Frontend** — `vite build` → serve static (GCS + CDN, or Cloud Run); point `VITE_API_URL` at the
-  staging API.
-- **CI/CD** — extend `.github/workflows/` so a **merge to `dev`** (after the required CI gate) builds
-  the image, runs `manage.py migrate`, deploys to Cloud Run staging, and smoke-checks
-  `/api/v1/health/`. Use **Workload Identity Federation** (keyless) for GCP auth from Actions.
-- **Secrets/config** — Secret Manager for all secrets; never commit `.env`.
+- **Web service** — Docker from the root `Dockerfile` (API + built SPA; gunicorn);
+  `preDeployCommand: python manage.py migrate --noinput`; `healthCheckPath: /api/v1/health/`;
+  `DJANGO_SETTINGS_MODULE=config.settings.production`; `ALLOWED_HOSTS` / `CORS_ALLOWED_ORIGINS`
+  set for the Render origin.
+- **Database** — CDEW's **own** Render Postgres (`cdew` + `prefect`), never promop's.
+- **Object storage (PHI)** — a private GCS bucket for originals (`GS_BUCKET_NAME`, already wired),
+  never a Render disk, so web and worker share files.
+- **Orchestration** — start with `PREFECT_DISPATCH=thread`. Add a self-hosted Prefect server (private
+  service) and a background worker running `python manage.py prefect_worker` when load needs it,
+  mirroring `docker-compose.yml`. No Prefect Cloud.
+- **LLM** — Vertex AI (`GEMINI_BACKEND=vertex`) through a service-account credential, since Render
+  has no Workload Identity.
+- **Secrets** — `sync: false`, never committed: CDEW's own `SECRET_KEY`, the promop service token,
+  the GCP service-account JSON, `FIREBASE_CREDENTIALS_JSON`, and the trusted-issuer map.
+- **CI/CD** — deploy only after the required CI gate: the Blueprint's auto-deploy-after-checks, or
+  phr's `deploy-staging.yml` pattern (trigger the Render deploy, wait until live, smoke-check).
 
-**Open questions:** Cloud Run vs GKE for the Prefect worker (long-running/queue-drain vs
-request-scoped); where the self-hosted Prefect server lives (GCE/GKE); CMEK on Cloud SQL/GCS.
+**PHI gate.** Real patient documents need a **BAA-covered Render setup** (a HIPAA-enabled workspace)
+and the Google BAA for Vertex/DocAI (#102). Until then staging uses synthetic data only.
+
+**Open questions:** production's host (Render, or the earlier GCP plan in #4–#14); when to add the
+Prefect server and worker; the region and plan sizes.
+
+*Superseded plan (2026-07): GCP — Cloud SQL, Cloud Run, a self-hosted Prefect server on GCE/GKE,
+Secret Manager and Workload Identity Federation. See `docs/issues.md` Epic 1 (#4–#14).*
 
 ## Pipeline
 

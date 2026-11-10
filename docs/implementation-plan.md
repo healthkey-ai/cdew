@@ -70,8 +70,8 @@ One bug fixed: puremagic mis-labels xlsx→docx, so OOXML mime is disambiguated 
 ## Phase 2 — Prefect orchestration  *(pipeline skeleton, no LLM yet)*
 
 - **Prefect setup:** work pool + worker with `DJANGO_SETTINGS_MODULE` + `django.setup()`; ORM in tasks.
-  **Local process work pool** for dev; **self-hosted Prefect on GCP** for staging/prod (no Prefect
-  Cloud, design §6).
+  **Local process work pool** for dev; **self-hosted Prefect** for staging/prod (no Prefect Cloud,
+  design §6). *Staging is now on Render: thread dispatch first, then a server and worker.*
 - **`ExtractionJob` model** linked to `prefect_flow_run_id`.
 - **Flow `extract-document`:** `ingest → parse` as tasks; API triggers via `run_deployment`, stores
   `flow_run_id`; tasks update `ExtractionJob.stage`/`.progress`.
@@ -276,8 +276,9 @@ Work done after the v1 pipeline landed (Phases 0–6), reconciling the plan with
   **required status checks**; `dev` and `main` are protected (PR-only, 0 required approvals so a solo
   maintainer isn't blocked, admins not enforced).
 - **Environments.** `dev` → **staging**, `main` → **production** (later). Repo `healthkey-ai/cdew`
-  (private), default branch `dev`. **Staging is not yet deployed** — standing it up on GCP is the next
-  infra step, tracked in [`TODO.md`](../TODO.md) (*Setup staging on GCP*).
+  (private), default branch `dev`. **Staging is not yet deployed.** It goes **on Render, independent
+  like PRISM** (`render.yaml` in this repo; #31 Part C), replacing the earlier GCP plan. Tracked in
+  [`TODO.md`](../TODO.md) (*Setup staging on Render*).
 
 ---
 
@@ -325,7 +326,7 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 
 | # | Workstream | CDEW issue | Depends on | Status |
 |---|---|---|---|---|
-| **D1** | **Patient identity design.** Three routes per alignment §2.7: PHR uploads take `person_id` from the patient's family token; staff link existing patients via a promop picker using their own sign-in; new patients via `provision`. The source hospital comes with the document. Decides the model, the migration of `patient_ref`, and the picker UX. | #112 | #31 (family-token sign-in), promop#2405 | **Decide now**; blocks PL, P2b, P5 |
+| **D1** | **Patient identity design.** Staff act on behalf of patients (alignment §2.7, design §11.1). Promop-signed-in staff link existing patients via a promop picker using their own sign-in; phr- or Firebase-signed-in staff need a fallback (link to a promop account, a narrow service search, or email match); new patients go through `provision`; per-staff organization scope; on-behalf-of audit. The source hospital comes with the document. Decides the model, the migration of `patient_ref`, and the picker UX. | #112 | #31 (staff sign-in), promop#2405 | **Decide now**; blocks PL, P2b, P5 |
 | **Auth** | **Partner auth like hk-labs:** Firebase (org-owned IdP) + promop-hosted family tokens via `PartnerAuthentication`; `partner-token/` exchange; `Identity.sub` uniqueness fix; local roles | #31 | promop#2405 (optional audience check) | **Ready**, independent of the extraction work |
 | **P0** | `ObjectType` catalog + `sync_object_types` (OpenAPI → source schemas; `promop_endpoint`, not `fhir_resource`) | #94 | — | **Ready** |
 | **P1** | `PromptDefinition.object_types`, `PromptVersion` snapshots; migrate `lab_report` / `genetics_report` (+ test samples) | #95 | P0 | **Ready** |
@@ -352,8 +353,9 @@ concept ids.
    `system/*.read` and `system/disease.read` (cdew#109, step 1).
 2. **Token storage.** Keep the token in Secret Manager (#10); never in `.env` in a shared
    environment.
-3. **An environment to integrate against.** CDEW staging is not provisioned (#4–#14). Locally,
-   promop's own docker-compose can run next to CDEW's.
+3. **An environment to integrate against.** CDEW staging on **Render** is not provisioned yet
+   (#31 Part C replaces the GCP plan in #4–#14). Locally, promop's own docker-compose can run next
+   to CDEW's.
 4. **BAA (#102)** executed before real PHI reaches Vertex or promop.
 
 ### Seams P0–P2 must leave for P2a / P2b

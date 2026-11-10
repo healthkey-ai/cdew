@@ -92,7 +92,7 @@ Standalone service, three processes plus the OMOP store it eventually writes to:
 | Orchestration | **Prefect** | Per-document flow; retries, concurrency limits, observability, future scheduling (§6). |
 | Doc parsing | **markitdown** | PDF/DOCX/XLSX/PPTX/image/HTML → Markdown text (§5). Geometry engine deferred (§9). |
 | LLM | **gemini via Pydantic AI** | Agents with typed, validated structured output; model-agnostic; `gemini-2.5-flash` default (Vertex AI for PHI). §10. |
-| Auth | Partner auth (hk-labs pattern) | Internal CDM admin users sign in with an org's **Firebase** or a **promop-hosted** account (family-auth RS256 tokens), exchanged for a CDEW JWT; local roles (§11). |
+| Auth | Partner auth (hk-labs pattern) | A standalone admin app (like PRISM). Staff sign in with a **promop**, **phr** or org-owned **Firebase** account; the token is exchanged for a CDEW JWT; roles are local (§11). |
 | Storage | GCS → S3 → local, private ACLs, signed URLs | PHI: immutable originals + parsed text in the protected store. |
 
 ---
@@ -233,9 +233,12 @@ def extract_document(document_id: int):
   redelivered/rerun flow replaces prior rows for that version, never duplicates.
 - **Observability & PHI:** Prefect UI shows flow/task state; **no PHI in Prefect logs** — safe
   category codes only.
-- **Deployment:** **self-hosted** Prefect (server + workers) on our GCP for staging/prod; a **local
-  process work pool** for dev. No Prefect Cloud — orchestration metadata (which references document
-  ids) stays in-perimeter. Work-pool type (Cloud Run vs GKE) is an infra follow-up.
+- **Deployment:** **self-hosted** Prefect, with a **local process work pool** for dev. No Prefect
+  Cloud — orchestration metadata (which references document ids) stays in-perimeter.
+  - **Staging on Render** (#31 Part C): start with `PREFECT_DISPATCH=thread`; add a Prefect server
+    (private service) and a background worker when load needs them, mirroring
+    `docker-compose.yml`.
+  - *Previously planned on GCP (Cloud Run vs GKE); production's host is still open.*
 - **Scheduling (later):** a scheduled deployment enumerates new/changed `DocumentReference`s and
   enqueues one flow per document (deduped) — the future FHIR-sync source.
 
@@ -426,26 +429,38 @@ structured output natively, supports tools/retries, and is async-native for the 
 
 ## 11. Auth & users
 
-Users are the **internal CDM validation team** (admin tooling), not patients. Auth is **hybrid**:
-identity comes from the user's **identity host**, while **role grants are managed locally** in this
-service. CDEW follows **hk-labs' partner-auth pattern** (`hk-labs` `backend/apps/accounts/`) and
-supports the identity modes of the family architecture (phr `docs/identity-architecture.md`):
+Users are the **internal CDM validation team** (admin tooling), not patients. **CDEW is a standalone
+admin app, like PRISM** (`healthkey-ai/prism`). It integrates with promop but runs independently:
+- **Who acts.** Staff sign in and **process documents on behalf of patients** (§11.1). Patients never
+  use CDEW, and CDEW is not embedded in phr.
+- **What CDEW keeps to itself.** Unlike PRISM, which shares promop's database, `SECRET_KEY` and
+  session cookie, CDEW keeps **its own database and secrets**. It integrates with promop **only
+  through promop's API**, because it holds uncommitted PHI and writes to promop
+  (`promop-alignment.md` §2.6–§2.7).
+
+Auth is **hybrid**: identity comes from the staff member's **identity host**, while **role grants
+are managed locally**. CDEW follows **hk-labs' partner-auth pattern** (`hk-labs`
+`backend/apps/accounts/`), extended to trust **several issuers at once** through a trusted-issuer
+map `{issuer: jwks_url}` (#31 Part A):
 
 | Identity host | Token | Provider |
 |---|---|---|
-| **promop-hosted** (the family default) | promop's family-auth RS256 access token (`iss` = promop's origin), verified against promop's JWKS | `PhrTokenProvider` with `PHR_ISSUER` / `PHR_JWKS_URL` pointed at promop, as promop's `docs/family-auth.md` tells siblings |
+| **promop-hosted** (the family default) | promop's family-auth RS256 access token (`iss` = promop's origin), verified against `…/api/v1/family/auth/jwks/` | JWKS provider (hk-labs' `PhrTokenProvider`), one entry in the issuer map |
+| **phr self-hosted** | a phr installation's RS256 access token (`iss` = its origin, or legacy `healthkey-phr`), verified against `…/api/v1/auth/jwks/` | the same JWKS provider, another entry in the issuer map |
 | **Org-owned Firebase** | a Firebase ID token (`iss` = `https://securetoken.google.com/<project>`), verified by `firebase-admin` | `FirebaseTokenProvider` |
-| **Local** (dev, admin-provisioned accounts) | CDEW's own SimpleJWT | — |
+| **Local** (dev, break-glass, admin-provisioned accounts) | CDEW's own SimpleJWT | — |
 
-- **Routing.** `PartnerAuthentication` routes each bearer token to the provider whose
-  `can_handle` matches its unverified `iss`, verifies it, and maps the claims to the house OIDC
-  `Identity` (`AUTH_USER_MODEL`, unique on `(issuer, sub)`).
-- **Exchange.** The first sign-in auto-provisions the Identity. The frontend exchanges a partner
-  token for a CDEW JWT pair at `POST /api/v1/auth/partner-token/` (#31).
-- **Firebase.** "No Firebase anywhere in the HealthKey family" means HealthKey runs none of its
-  own; an **org-owned** Firebase is a supported mode.
-- *Revised 2026-11-09. This originally planned Firebase via `hk-identity`; an interim edit wrongly
-  dropped Firebase.*
+- **Routing.** `PartnerAuthentication` routes each bearer token to the provider whose `can_handle`
+  matches its unverified `iss`, verifies it, and maps the claims to the house OIDC `Identity`
+  (`AUTH_USER_MODEL`, unique on `(issuer, sub)` only; the global `sub` uniqueness hk-labs fixed in
+  its #59 must go).
+- **No introspection URLs.** Every token verifies offline against JWKS.
+- **Exchange.** The first sign-in auto-provisions the Identity. The login page offers each configured
+  host and exchanges its token for a CDEW JWT pair at `POST /api/v1/auth/partner-token/`.
+- **Firebase.** "No Firebase anywhere in the HealthKey family" means HealthKey runs none of its own;
+  an **org-owned** Firebase is a supported mode.
+- *Revised 2026-11-09. This originally planned Firebase via `hk-identity`. An interim edit wrongly
+  dropped Firebase, and a later one embedded CDEW in phr; both were superseded.*
 
 A local role table assigns **reviewer** (verify/approve), **prompt-author** (manage
 prompts/schemas/taxonomy, §8), and **admin** (roles + config), edited via an admin UI. DRF
@@ -455,9 +470,22 @@ while letting validation own its own role assignments.
 **Accounts are admin-provisioned — there is no self-service sign-up.** An admin creates a local
 identity and grants/edits its roles through the **Users** admin screen (`/api/v1/auth/users/`,
 admin-gated: list · create with email+password+roles · `PATCH …/{id}/roles/`). The login screen is
-the only unauthenticated surface. Sign-in with a promop-hosted or Firebase account works through
+the only unauthenticated surface. Sign-in with a promop, phr or Firebase account works through
 `PartnerAuthentication` once wired (#31). An auto-provisioned identity gets **no** CDEW roles until
 an admin grants them; a provider's own role claims are never auto-granted.
+
+### 11.1 Acting on behalf of patients
+Staff upload and review documents **for** a patient, chosen per document (design: #112, D1;
+`promop-alignment.md` §2.7).
+- **Existing patients** come from a promop patient picker, using the staff member's own promop
+  sign-in so promop's access rules apply. Staff signed in via phr or Firebase need the fallback D1
+  chooses.
+- **New patients** are provisioned with email + organization.
+- **Organization scope.** Staff act only for organizations they are allowed: promop's grants when
+  signed in via promop, CDEW-local grants otherwise.
+- **Audit.** The **acting staff identity** is recorded on every staged, reviewed and committed record,
+  and uploading captures the staff member's attestation that they are authorised for that patient.
+  Commits to promop use CDEW's service token (`DOCUMENT_EXTRACTION`).
 
 ---
 
@@ -512,10 +540,12 @@ When v1's staging is trusted, add the commit phase:
 
 - **Gemini access** — Vertex AI (`google-vertex`, BAA) in staging/prod; Generative Language API
   (`google-gla`, API key) in local dev; per-environment via settings (§10).
-- **Prefect deployment** — self-hosted on our GCP for staging/prod; local process work pool for dev;
-  no Prefect Cloud (§6).
+- **Prefect deployment** — self-hosted; thread dispatch first on Render staging, then a server and
+  worker; local process work pool for dev; no Prefect Cloud (§6).
 - **Prefect ↔ Django coupling** — ORM-in-worker (§6).
-- **Auth / roles** — hybrid: identity from `hk-identity`, role grants in a local table (§11).
+- **Auth / roles** — a standalone admin app like PRISM. Staff sign in via promop, phr or Firebase
+  (partner auth, a multi-issuer map); role grants live in a local table; staff act on behalf of
+  patients (§11, §11.1).
 - **Scanned/image documents in v1** — defer OCR; flag text-less scans to the human queue and measure
   volume (§5). Geometry OCR (Chandra/DeepSeek) is a tracked future option — [`TODO.md`](../TODO.md).
 - **`unclassified` triage** — **split** into `ambiguous` vs `out_of_taxonomy` reasons (both queue to
@@ -523,8 +553,12 @@ When v1's staging is trusted, add the commit phase:
 - **Environments & delivery** — `dev` → **staging**, `main` → **production** (later). Every change
   lands via a PR into `dev`; **GitHub Actions CI** (backend `ci.sh` gate + frontend build/lint) is a
   **required status check**, with branch protection on `dev`/`main` (PR-only, no direct pushes). Repo:
-  `healthkey-ai/cdew` (private). Standing up **staging on GCP** is the next infra step, still unbuilt —
-  tracked in [`TODO.md`](../TODO.md).
+  `healthkey-ai/cdew` (private).
+  - **Staging** is deployed **on Render, independently, like PRISM**: a `render.yaml` in this repo,
+    its own Postgres, deployed after CI (#31 Part C). It is still unbuilt — tracked in
+    [`TODO.md`](../TODO.md).
+  - **Real PHI waits** for a BAA-covered Render workspace and the Google BAA (#102).
+  - **Production's host is still open** (GCP was the earlier plan).
 
 ### Resolved as default (low-stakes; revisit any time)
 
