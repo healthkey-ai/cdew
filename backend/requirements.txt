@@ -27,6 +27,9 @@ anthropic==0.125.0
 firebase-admin>=6.5,<7.0             # Firebase ID-token verification (org-owned Firebase)
 PyJWT[crypto]>=2.8,<3                # RS256 verification of promop/phr family tokens via JWKS
 httpx>=0.27,<1                       # JWKS fetch + server-side sign-in to promop/phr
+pypdfium2>=4.30,<5                   # geometry: PDF text-layer word boxes + page images (Apache-2.0/BSD)
+pytesseract>=0.3.13,<0.4             # geometry: Tesseract OCR for scans/images (needs the tesseract binary)
+Pillow>=10                           # page images for geometry
 
 # ── Test / tooling ──
 pytest==8.1.1

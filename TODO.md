@@ -56,11 +56,11 @@ Secret Manager and Workload Identity Federation. See `docs/issues.md` Epic 1 (#4
 
 ## Pipeline
 
-### Use PyMuPDF for Native PDFs (Digital Text)
+### ✅ Geometry for native PDFs and scans — *built: PDF text layer (pypdfium2, chosen over AGPL PyMuPDF) → Tesseract → Document AI (when enabled); no engine → document shown without the overlay (`documents/geometry/engines.py`)*
 
 ### For Scanned PDFs (Images)
 
-#### Try Claude Fable 5 for Geometry OCR
+#### Try Claude Fable 5 for Geometry OCR — *if Tesseract's accuracy on real scans (faxes, handwriting) isn't enough*
 
 #### Use Chandra / DeepSeek-OCR as Geometry OCR engine
 

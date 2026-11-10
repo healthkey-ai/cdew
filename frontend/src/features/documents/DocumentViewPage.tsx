@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, FileText, Image as ImageIcon } from "lucide-react";
 
@@ -6,35 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useDocument, useDocumentText } from "./api";
+import { OriginalDocument } from "./OriginalDocument";
 import { statusLabel, statusVariant } from "./status";
-
-/** Authed blob URL for the original document; fetched only when `enabled` (the
- * Original tab is open), revoked on unmount. */
-function useDocumentFileUrl(id: number | null, enabled: boolean): string | null {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!enabled || id == null) return;
-    let obj: string | null = null;
-    let cancelled = false;
-    api
-      .get(`/documents/${id}/file/`, { responseType: "blob" })
-      .then((r) => {
-        if (!cancelled) {
-          obj = URL.createObjectURL(r.data as Blob);
-          setUrl(obj);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (obj) URL.revokeObjectURL(obj);
-    };
-  }, [id, enabled]);
-  return url;
-}
 
 /** Document view (design §3, §9): the document on its own page — the original
  * upload (PDF/image preview) or its parsed text. Fact review lives in Review. */
@@ -46,7 +21,6 @@ export function DocumentViewPage() {
   const text = useDocumentText(id);
 
   const [view, setView] = useState<"original" | "parsed">("original");
-  const fileUrl = useDocumentFileUrl(id, view === "original");
   const mime = doc.data?.mime ?? "";
   const content = text.data?.content ?? "";
 
@@ -103,21 +77,7 @@ export function DocumentViewPage() {
           </CardHeader>
           <CardContent>
             {view === "original" ? (
-              !fileUrl ? (
-                <Skeleton className="h-[70vh] w-full" />
-              ) : mime === "application/pdf" ? (
-                <iframe src={fileUrl} title="Original document" className="h-[70vh] w-full rounded-md border" />
-              ) : mime.startsWith("image/") ? (
-                <img src={fileUrl} alt="Original document" className="max-h-[70vh] w-full rounded-md border object-contain" />
-              ) : (
-                <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
-                  No inline preview for {mime || "this file type"}.{" "}
-                  <a href={fileUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                    Open in a new tab
-                  </a>
-                  . Switch to <span className="font-medium">Parsed</span> to read the extracted text.
-                </div>
-              )
+              id != null && <OriginalDocument docId={id} mime={mime} />
             ) : text.isPending ? (
               <Skeleton className="h-96 w-full" />
             ) : text.isError ? (

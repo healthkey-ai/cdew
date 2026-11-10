@@ -11,7 +11,7 @@ class DocumentGeometrySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DocumentGeometry
-        fields = ("status", "pages", "errors", "updated_at")
+        fields = ("status", "engine", "pages", "errors", "updated_at")
         read_only_fields = fields
 
     def get_pages(self, obj):

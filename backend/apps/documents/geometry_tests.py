@@ -4,20 +4,17 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import Identity, Role, RoleAssignment
-from apps.documents.geometry.docai import _ocr_fn
-from apps.documents.geometry.testing import fake_ocr
+from apps.documents.geometry.engines import compute
 from apps.documents.ingest import ingest_upload
 
 
-class DocAiBoundaryTests(SimpleTestCase):
-    """The Document AI boundary (#66) — hermetic (test settings point it at the
-    double, so no Doc AI call). The real client is lazy-imported only in `ocr`."""
-
-    def test_boundary_resolves_to_double_under_test_settings(self):
-        assert _ocr_fn() is fake_ocr
+class GeometryBoundaryTests(SimpleTestCase):
+    """The geometry boundary — hermetic (test settings point GEOMETRY_OCR_FN at the
+    double, so no engine runs). Real engines: geometry_engine_tests.py."""
 
     def test_double_tokenizes_words_with_normalized_boxes(self):
-        r = _ocr_fn()(b"Sodium 140 mmol/L", "text/plain")
+        r = compute(b"Sodium 140 mmol/L", "text/plain")
+        assert r["engine"] == "test"
         assert r["pages"][0]["page"] == 1
         assert [t["text"] for t in r["tokens"]] == ["Sodium", "140", "mmol/L"]
         for t in r["tokens"]:
@@ -34,18 +31,19 @@ class GeometryServiceTests(TestCase):
 
         doc, _ = ingest_upload(SimpleUploadedFile("g.txt", b"Sodium 140 mmol/L", content_type="text/plain"), "GEO")
         geom = execute_geometry(doc.id)
-        assert geom.status == GeometryStatus.READY
+        assert (geom.status, geom.engine) == (GeometryStatus.READY, "test")
         assert [t["text"] for t in geom.tokens] == ["Sodium", "140", "mmol/L"]
         assert geom.pages[0]["page"] == 1
         # idempotent re-compute → same row, still ready
         geom2 = execute_geometry(doc.id)
         assert geom2.id == geom.id and geom2.status == GeometryStatus.READY
 
-    def test_docai_geometry_task_fn(self):
-        from apps.pipeline.tasks import docai_geometry_task
+    def test_geometry_task_fn(self):
+        from apps.pipeline.tasks import geometry_task
 
         doc, _ = ingest_upload(SimpleUploadedFile("g2.txt", b"Calcium 9.4 mg/dL", content_type="text/plain"), "GEO2")
-        r = docai_geometry_task.fn(doc.id)
+        r = geometry_task.fn(doc.id)
+        assert r["engine"] == "test"
         assert [t["text"] for t in r["tokens"]] == ["Calcium", "9.4", "mg/dL"]
 
 

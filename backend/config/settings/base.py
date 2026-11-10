@@ -259,10 +259,19 @@ EXTRACT_MULTIMODAL = env.bool("EXTRACT_MULTIMODAL", default=True)
 DOCAI_ENABLED = env.bool("DOCAI_ENABLED", default=False)
 DOCAI_LOCATION = env("DOCAI_LOCATION", default="us")
 DOCAI_PROCESSOR_ID = env("DOCAI_PROCESSOR_ID", default="")
-# Boundary seam (dotted path to an ocr(content, mime_type) callable). Empty → the
-# real client (apps.documents.geometry.docai.ocr). Tests point this at a
-# deterministic double so CI never calls Document AI.
-DOCAI_OCR_FN = env("DOCAI_OCR_FN", default="")
+# ── Geometry engines for the review overlay (geometry/engines.py) ─────────────
+# Tried in order; the first that applies wins: the PDF's own text layer (local,
+# exact), Tesseract OCR (local; scans/images; needs the tesseract binary — the
+# deploy image installs it), then Document AI (only when DOCAI_ENABLED). None
+# applies → the document is shown without the overlay.
+GEOMETRY_ENGINES = env.list("GEOMETRY_ENGINES", default=["pdf_text", "tesseract", "docai"])
+GEOMETRY_RENDER_SCALE = env.float("GEOMETRY_RENDER_SCALE", default=2.0)   # page images (×72 dpi)
+GEOMETRY_OCR_SCALE = env.float("GEOMETRY_OCR_SCALE", default=3.0)         # PDF pages rendered for OCR
+GEOMETRY_MIN_TEXT_CHARS = env.int("GEOMETRY_MIN_TEXT_CHARS", default=20)  # per page; fewer → treat as a scan
+GEOMETRY_MAX_IMAGE_WIDTH = env.int("GEOMETRY_MAX_IMAGE_WIDTH", default=2000)
+# Boundary seam (dotted path to an ocr(content, mime_type) callable) replacing the
+# whole engine chain. Tests point it at a deterministic double.
+GEOMETRY_OCR_FN = env("GEOMETRY_OCR_FN", default="")
 
 # Cap on concurrent gemini calls (design §6) — enforced as a Prefect global
 # concurrency limit (tag "gemini") when the extract fan-out runs under the

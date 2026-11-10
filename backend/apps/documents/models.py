@@ -197,16 +197,21 @@ class GeometryStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     READY = "ready", "Ready"
     FAILED = "failed", "Failed"
+    # No engine applies (e.g. plain text, or a scan with no OCR installed). Not an
+    # error: the document is shown without the overlay.
+    UNAVAILABLE = "unavailable", "Unavailable"
 
 
 class DocumentGeometry(models.Model):
-    """Cached Document AI geometry for a document (design §9, #67): per-page
-    dimensions + the stored page-image path, and per-token text + **normalized**
-    bounding box. Computed on-demand (first review) then reused. Page images live in
-    the private object store; token text is PHI (same boundary as the parsed text)."""
+    """Cached geometry for a document (design §9, #67): per-page dimensions + the
+    stored page-image path, and per-token text + **normalized** bounding box, from
+    the first engine that applies (geometry/engines.py). Computed on-demand (first
+    review) then reused. Page images live in the private object store; token text
+    is PHI (same boundary as the parsed text)."""
 
     document = models.OneToOneField(SourceDocument, on_delete=models.CASCADE, related_name="geometry")
     status = models.CharField(max_length=16, choices=GeometryStatus.choices, default=GeometryStatus.PENDING)
+    engine = models.CharField(max_length=32, blank=True, default="")  # pdf_text | tesseract | docai
     pages = models.JSONField(default=list)   # [{page, width, height, image_path, image_mime}]
     tokens = models.JSONField(default=list)  # [{page, text, bbox:[x0,y0,x1,y1]}] — bbox normalized 0..1
     errors = models.JSONField(default=list)  # [{"code": "..."}] — safe category codes only, never PHI
