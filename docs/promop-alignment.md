@@ -8,7 +8,14 @@
 > types in a single pass); and make the commit-to-promop step (M5, #34–#38) mostly
 > mechanical.
 >
-> **Last verified against promop `dev` @ `193184f2` (2026-10-20).** The 2026-10-01
+> **Last verified against promop `origin/dev` @ `30d561cf` (2026-11-09).** Since the
+> last check promop shipped both CDEW asks (2026-10-22): **text terms in
+> `code-mappings/lookup`** (promop#1975, replacing the separate translation service
+> asked in #1944) and the **disease relevance API** with patient-disease read and
+> signals (promop#1971). Neither blocks CDEW any more; the build plan is in
+> `docs/implementation-plan.md` (Phase 7).
+>
+> Earlier history: the 2026-10-01
 > review (@ `a886ca5a`) reversed the commit strategy (§8, decision #1: FHIR bundle →
 > code lookup + bulk OMOP upsert), replaced patient resolution (decision #2:
 > `find_or_create` is closed to services → `persons/provision`), and added service
@@ -133,11 +140,23 @@ facts it produced**.
   `{organization_id?, codes:[{source_vocabulary_id, source_code, source_text, omop_table}]}` →
   `{mappings:{"V|C":{status, resolved, …}}, resolved, unresolved}`. Resolves through promop's
   curator-approved source-code→concept mappings (SCCM); an **unresolved** term is recorded as a
-  *proposed* mapping for a curator — it is not auto-coded. **Every entry must carry a
-  `source_vocabulary_id` and a `source_code`** — a term with only `source_text` is rejected with
-  400 (`code_mapping_lookup`, views.py; re-checked 2026-10-20). Most extracted facts are text-only,
-  so this blocks §8 step 2 as written (13.8). Since 2026-10-01 the lookup also returns **unit
-  conversions**.
+  *proposed* mapping for a curator — it is not auto-coded. Since 2026-10-01 the lookup also returns
+  **unit conversions**.
+  - **Text terms (promop#1975, merged 2026-10-22).** Send an empty `source_vocabulary_id` (the
+    Uncoded vocabulary) with the extracted wording as `source_code`, plus `source_unit`,
+    `quantity` and `specimen` as context.
+    - **How a term is matched:** a curated mapping wins, matched case-insensitively; a lab term in
+      a unit with an approved axis variant resolves to that variant's LOINC; a new term is offered
+      to Suggest, with candidates filtered by the LOINC axes the context settles.
+    - **Unknown terms** are queued under the **Uncoded** tab with their context, and no placeholder
+      concept is minted.
+    - **The answer:** `resolved` true/false, `match` (`ambiguous` | `unresolved`) with up to 10
+      candidates, and `matcher_version`. Only `resolved: true` permits a write.
+    - **Terms are global**, not per organization. **CDEW must send wording as extracted**, collapsing
+      whitespace only, and do no aliasing (cdew#110).
+    - Other object types use the same call with their `omop_table`, through Suggest's SNOMED and
+      RxNorm retrieval.
+    - Earlier (to 2026-10-20) a term with no source code was rejected with 400.
 - **Granular OMOP CRUD — now idempotent + bulk** (`POST /api/v1/{conditions,drug-exposures,
   measurements,observations,procedures}/`). Still expects **integer concept_ids** and does no
   coding, but since July (`_OmopBulkCreateMixin`, views.py ~L6545):
@@ -241,21 +260,15 @@ from promop's OpenAPI schema — **not author-editable**. Shape:
     "value_as_number": "Numeric result if present; leave unset for qualitative results."
   },
   "default_guidance": "Extract each distinct result as its own fact; a lab panel is many facts.",
-  "relevance": {                     // layer 2 (§7a) — per disease, synced as data from promop
-    "multiple_myeloma": {
-      "version": "…",                // promop relevance version, pinned on each run (§7a.5)
-      "concepts": [
-        { "concept_id": 0, "name": "M-protein", "synonyms": ["M-spike", "monoclonal protein"] }
-      ]
-    }
-  },
   "sync": { "promop_schema_version": "…", "synced_at": "…" }
 }
 ```
 
 `source_schema` + `field_guide` + `default_guidance` are the inputs the prompt composer
-consumes (§7), plus the patient's disease slice of `relevance` when the disease is known
-(§7a). `key`/`omop_target`/`promop_endpoint` drive routing and commit.
+consumes (§7). When the patient's disease is known, the composer also takes that run's relevance
+set (§7a). That set is **not stored in the catalog**: promop serves it per patient
+(`GET /api/v1/relevance/?person_id=`), each concept carries its `omop_table`, and the composer
+groups concepts by object type. `key`/`omop_target`/`promop_endpoint` drive routing and commit.
 
 ### 3.2 What goes into `source_schema`
 
@@ -564,17 +577,27 @@ Without layer 2, relevance leaks into prose: an author typing *"only extract mye
 labs"* is paraphrasing curated data, and every extractor carrying that sentence is an unversioned
 fork of it. Relevance must come from the data instead.
 
-**What promop serves today (verified):**
-- Disease scoping lives in a per-disease marker / priority-field inventory, joined to the approved
-  field → concept assignments in `FieldConceptMapping` (`omop_core/models.py` L4017; it has no
-  disease column of its own).
-- It is **served per disease only for genomics**: `GET patient-records/{id}/genomics-catalog/`
-  filters markers by `PatientRecord.disease` and returns a `version` (`views.py` L1165). That
-  endpoint is per patient, not a disease-level catalog.
-- For labs and the other domains it exists only as a reference report
-  (`omop_core/services/field_inventory_priority.py`) — **no API**.
+**What promop serves (shipped in promop#1971, 2026-10-22; contract: promop
+`docs/disease_relevance.md`):**
+- **`GET /api/v1/relevance/?disease=MM[&disease=FL]`** (`system/*.read`) returns the concepts that
+  matter, in three tiers:
+  - `disease`: the disease tab's fields plus the genomics priority markers;
+  - `curated`: concepts accepted from signals;
+  - `common`: fields every supported cancer shares.
 
-→ **Ask promop** for a disease-level, versioned relevance endpoint covering all domains (§13a).
+  Only approved `FieldConceptMapping` rows are used. Each concept carries `name`, `synonyms`,
+  `omop_table`, `field_name`, `tier` and `diseases`; fields still awaiting a concept are listed in
+  `unmapped_fields`. Supported diseases: BC, FL, MM, CLL, MCL.
+- **`?person_id=N`** (`system/disease.read`, which reads diseases only) returns the patient's
+  supported cancers, primary first, and the union of their sets. `diseases: []` means no supported
+  cancer: extract without emphasis.
+- **Versioned and cacheable.** `version` changes whenever any answer could change; the ETag plus
+  `If-None-Match` gives 304.
+- **`POST /api/v1/relevance/signals/`** (`system/etl.write`) takes aggregate absent-from-relevance
+  counts, which curators accept or reject on a promop page (§7a.7).
+
+*Before 2026-10-22 relevance was served only for genomics, per patient
+(`patient-records/{id}/genomics-catalog/`).*
 
 ### 7a.2 Where disease enters CDEW — from the patient
 | Option | Verdict |
@@ -592,9 +615,12 @@ This changes the run model, not just a parameter:
 - **More than one disease:** use the union of the relevance sets.
 
 ### 7a.3 In the catalog and the prompt — emphasize, never restrict
-- **Catalog (§3.1):** each object type gains a `relevance` block keyed by disease:
-  `{disease_code: {version, concepts: [{concept_id, name, synonyms}]}}`. It syncs alongside the
-  definitions (§5), but as a **data fetch** from the relevance endpoint, not from OpenAPI.
+- **Per run, not in the catalog:** relevance is read per patient
+  (`GET /api/v1/relevance/?person_id=`), pinned on the run (§7a.5), and grouped by object type
+  through each concept's `omop_table`. The `disease` and `curated` tiers become priorities. The
+  `common` tier is general clinical fields the base prompt already covers, so it is not listed.
+  *(Revised 2026-11-09; an earlier draft stored a per-disease `relevance` block on each catalog
+  entry.)*
 - **Composer (§7):** relevance becomes one more input —
   `(object definitions, technique guidance, relevance set, document text)`. No restructure.
 - **Prompt (§7.1):** the object section names the disease's concepts and synonyms as
@@ -670,10 +696,10 @@ token held in Secret Manager. For a verified document:
    (`omop_table` = the object's `omop_target`), since mappings may have changed during review.
    Resolved terms give the `*_concept` ids. **Unresolved** terms become proposed mappings in promop's curator queue; those facts
    wait in CDEW as `approved · awaiting_mapping` and are retried on a schedule — they are never
-   committed half-coded. **Blocked today:** the lookup requires `source_vocabulary_id` +
-   `source_code` and rejects text-only terms (§2.4). Proposed: a CDEW source vocabulary (e.g.
-   `urn:cdew:text`) with the normalized source text as the code, so text terms enter promop's
-   curator queue like any other source code — needs promop agreement (13.8).
+   committed half-coded. Each entry is a **text term**: `source_vocabulary_id: ""`, the wording as
+   extracted as `source_code`, plus `source_unit` / `quantity` / `specimen` (§2.4; promop#1975).
+   Re-checks of unresolved terms are throttled, because each one counts as a new sighting in
+   promop's queue (13.13).
 3. **Bulk upsert per object type.** A JSON-list `POST` to each object's `promop_endpoint`
    (≤ 1000 rows, one person per batch) with header **`X-Provenance-Source: DOCUMENT_EXTRACTION`**
    and `*_type_concept = 32883` (promop's "Document extraction" type concept). Upsert makes a
@@ -869,10 +895,12 @@ its header. From the document page they ad-hoc-select `observation` and run:
   existing single-domain extractors → single-object-type. (Touches #26/#27 authoring UI.)
 - **P2 — Tagged-union extraction.** Prompt composer (§7); `build_extraction_output_model`
   union; `ExtractionRecord.object_type`; per-object validation + provenance.
-- **P2b — Disease relevance (§7a).** Patient linking at route time + disease read; relevance
-  snapshot sync and pinning on runs; composer priority block; lookup at staging + relevance
-  ranking in review; stale-relevance flag; absent-from-relevance counts. Needs promop's
-  relevance endpoint (§13a).
+- **P2a — Term resolution at staging** (cdew#110). A text-term lookup per document; each fact
+  gets a concept or a resolution state.
+- **P2b — Disease relevance (§7a, cdew#109).** Patient linking at route time; per-run relevance
+  read, snapshot and pin; composer priority block; relevance ranking in review; stale-relevance
+  flag; absent-from-relevance signals. promop's side shipped (promop#1971). Sequencing and steps:
+  `docs/implementation-plan.md`, Phase 7.
 - **P3 — Classification.** Taxonomy seeded from promop `doc_type` + CDEW additions.
 - **P4 — Lint migration.** Replace REGISTRY with synced schemas; keep the shape-lint codes.
 - **P5 — Commit (M5).** Service token + patient link table (`persons/provision`) + code lookup
@@ -903,10 +931,14 @@ its header. From the document page they ad-hoc-select `observation` and run:
    episodes only in `upload_fhir`, which we no longer use. When needed, write them via
    `POST /api/v1/therapy-lines/` (episode + drug exposures).
 6. **Service auth** — managed `ServiceApplication` token `cdew` with scope
-   **`system/etl.write`** only (+ `system/*.read` if CDEW needs reads) — sufficient for lookup,
-   provision and every per-type write, and it cannot delete (§2.6). Hospital attribution via
-   `X-Provenance-Organization-ID` on every write (§8 step 6). *(Settled 2026-10-20.)* CDEW now
-   also **reads** the patient's disease (§7a.2); the read scope for that is open (13.11).
+   **`system/etl.write`** — sufficient for lookup, provision, signals and every per-type write,
+   and it cannot delete (§2.6). Hospital attribution via `X-Provenance-Organization-ID` on every
+   write (§8 step 6). *(Settled 2026-10-20.)*
+
+   For relevance (§7a) CDEW also holds **`system/*.read`** (the relevance set, which is reference
+   data) and **`system/disease.read`** (the patient's diseases only, never the full record).
+   promop staff grant these on CDEW's service application (cdew#109). CDEW does **not** need
+   `system/etl.delete` or `patient/*.read`. *(Settled 2026-11-09.)*
 7. **Disease relevance — layer 2** *(new 2026-10-20, from promop review)*. Disease comes from
    the patient's promop record at run time, not the extractor; extractors stay
    disease-agnostic. Curated relevance **emphasizes, never restricts** the prompt; author
@@ -976,42 +1008,54 @@ human breadcrumb (no promop schema change). **No promop FK requested.**
 7. ~~**Org scoping / hospital attribution.**~~ *Resolved 2026-10-20:* #1690 is merged; a
    managed token sends `X-Provenance-Organization-ID` per write (§2.5, §8 step 6). An
    org-linked OAuth client is only needed if CDEW must be confined to one tenant's patients.
-8. **Lookup inputs for free text — blocking.** The lookup rejects entries without
-   `source_vocabulary_id` + `source_code`, and most extracted facts are text-only. Proposed:
-   a CDEW source vocabulary (`urn:cdew:text`) with the normalized text as the code, so promop
-   curators map text terms through the normal SCCM queue. Needs promop agreement on the
-   vocabulary id, the normalization rule, and whether text "codes" should be scoped by
-   organization.
+8. ~~**Lookup inputs for free text.**~~ *Resolved 2026-10-22 (promop#1975).* The empty
+   vocabulary plus the wording as the code. No CDEW normalization; terms are global, not per
+   organization (§2.4).
 9. **Yes/no values.** Measurement/observation `validate()` now coerces boolean-assertion
    codes; define how CDEW sends extracted yes/no findings so they survive the coercion.
-10. **Unknown and multiple diseases** (§7a.2). Is the disease-agnostic prompt plus a
-    `relevance: none` flag the right default when the disease is unknown, and should CDEW
-    infer a disease from the document itself (e.g. the first pathology report)? Does promop
-    model more than one disease per patient (`PatientRecord.disease` is a single field)?
-11. **Read scope for the patient's disease.** CDEW must now read `PatientRecord.disease` before
-    extraction; confirm the minimal service scope for that read. *(Ask promop.)*
-12. **Absent-from-relevance threshold and channel** (§7a.7). Is "≥ 30 % of a disease's
-    documents" the right trigger, and how do counts reach promop curators — a CDEW report,
-    or a promop proposal endpoint like layer 1's proposed mappings?
+10. **Unknown disease** (§7a.2). *Multiple diseases answered by promop:* `?person_id=` returns
+    every supported cancer, primary first, and the union of their sets. Still open: should CDEW
+    infer a disease from the document itself (e.g. the first pathology report), or always
+    extract without emphasis until promop's record names one? (Leaning: no inference in v1.)
+11. ~~**Read scope for the patient's disease.**~~ *Resolved:* `system/disease.read`, which reads
+    diseases only (promop#1971).
+12. **Absent-from-relevance threshold** (§7a.7). *Channel resolved:* `POST
+    /api/v1/relevance/signals/`, with curators deciding per (disease, concept). What remains is a
+    CDEW setting: the minimum document count worth sending (plan default 3).
+13. **Lookup re-checks inflate sightings.** Each unresolved lookup counts as a sighting in
+    promop's queue (promop #2125). Text terms have no per-patient rows, so CDEW re-checking the
+    same fact keeps raising the count curators use to prioritise. *(Ask promop for a non-counting
+    re-check mode; until then CDEW re-checks at most daily per term.)*
+14. **Field metadata for the prompt** (cdew#103). Value kind, unit, allowed values and computed
+    role per relevance concept are not in the relevance response. *(Ask promop: add them to the
+    concepts, or open the deployment-level `writable-fields` descriptor to `system/*.read`.)*
 
-### 13a. Asks for the promop team (status as of 2026-10-20, promop `dev` @ `193184f2`)
+### 13a. Asks for the promop team (status as of 2026-11-09, promop `origin/dev` @ `30d561cf`)
 
 **Open — in priority order**
-1. **Accept text-only terms in `code-mappings/lookup`** (13.8) — agree a CDEW source vocabulary
-   (`urn:cdew:text`) + normalization rule, or add a text-only lookup mode. **Blocks M5 commit.**
-2. **Disease-level relevance endpoint** (§7a.1) — versioned, covering every domain, keyed by
-   disease (not per patient like `genomics-catalog/`), returning concept ids, names and
-   synonyms. Plus a channel for absent-from-relevance reports (13.12) and the read scope for
-   `PatientRecord.disease` (13.11). **Blocks P2b.**
-3. **Authoritative home for variant origin** (§12a-a) — issue **#348**, open, no activity since
-   2026-08-20; `genomics.py` still clears `qualifier_concept`.
+1. **Variant origin and a genomics receiver** (§12a-a). promop#348 has been open since
+   2026-08-20, and `genomics.py` still clears `qualifier_concept`. promop#1245 (idempotent genomics
+   import) is open. **Blocks committing genomic findings** (plan workstream G).
+2. **Non-counting lookup re-check** (13.13), so CDEW's re-checks of unresolved terms don't inflate
+   curators' sighting counts. *(To file.)*
+3. **Field metadata for relevance concepts** (13.14, cdew#103): value kind, unit, allowed values,
+   computed role. *(To file.)*
 4. **Claimed-Person links** (13.5b) — may a service write to a Person returned in a
    `claimed: true` 409, and what consent applies?
 5. **Honour `DOCUMENT_EXTRACTION` for service writes in `lab-results/sync` and `fhir/sync`** —
-   still `ADMIN_CORRECTION` (`lab_results/sync.py` L338) / `EHR_SYNC` (`fhir/sync.py` L247).
-   Not blocking: CDEW commits through the per-type endpoints, which honour the header.
+   still `ADMIN_CORRECTION` / `EHR_SYNC` on 2026-11-09. Not blocking: CDEW commits through the
+   per-type endpoints, which honour the header.
 
 **Done**
+- ✅ **Text-to-code translation** — [promop#1944](https://github.com/healthkey-ai/promop/issues/1944),
+  closed 2026-10-22 by promop#1975. No separate `/translate/` service and no hk-labs port.
+  Instead, `code-mappings/lookup` accepts text terms (§2.4). promop's lookup + Suggest already
+  apply all six LOINC axes, curator overrides and per-unit variants, which hk-labs' matcher lacks.
+  CDEW side: [cdew#110](https://github.com/healthkey-ai/cdew/issues/110).
+- ✅ **Disease relevance** — [promop#1942](https://github.com/healthkey-ai/promop/issues/1942),
+  closed 2026-10-22 by promop#1971 (+ curator page promop#1974). It delivered the relevance set,
+  the patient-disease read via `system/disease.read`, and signals (§7a.1). CDEW side:
+  [cdew#109](https://github.com/healthkey-ai/cdew/issues/109).
 - ✅ Merge #1690 (source-hospital attribution) — on `dev`; `X-Provenance-Organization-ID`.
 - ✅ Scope for per-type writes — `system/etl.write` via `EtlPatientCrudPermission` (already
   so on 2026-10-01).

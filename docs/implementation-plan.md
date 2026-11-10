@@ -279,13 +279,253 @@ Work done after the v1 pipeline landed (Phases 0–6), reconciling the plan with
 
 ---
 
-## Phase 7 — Commit to promop  *(next iteration, per design §12)*
+## Phase 7 — promop alignment & commit  *(next; design: [`promop-alignment.md`](./promop-alignment.md))*
 
-- Vocabulary coding: port hk-labs LOINC matcher (labs); SNOMED/RxNorm/UCUM via OMOP vocab tables
-  (pin Athena release); unmapped → human review.
-- Commit via promop **`/api/fhir/sync/` connector** (no direct writes); `ExtractionRecord` →
-  `committed` + `committed_ref`.
-- Reconcile/dedup against structured data already in promop.
+The original Phase 7 had CDEW port its own vocabulary coding and commit through promop's FHIR
+`sync` connector. Both were superseded by the 2026-10 promop reviews (alignment doc §8, decisions
+#1–#2): promop owns coding through its curated mappings, and CDEW commits through the code lookup
+plus per-type bulk upserts.
+
+*Status as of 2026-11-09, verified against promop `origin/dev` @ `30d561cf`.* **Every promop
+dependency for term resolution and disease relevance has shipped** (promop#1971, #1975, both merged
+2026-10-22). What remains is mostly CDEW work, one CDEW design decision, and operational setup.
+
+### What promop provides now
+
+| Capability | Endpoint | Service scope | Ref |
+|---|---|---|---|
+| **Words → codes** for every object type. Send the extracted wording as the code with an empty vocabulary, plus unit, value and specimen as context. Curated mappings win; lab terms are filtered by all six LOINC axes and routed by unit; unknown terms go to promop's curator queue. Returns `resolved` true/false, `match` (`ambiguous` \| `unresolved`) with candidates, and `matcher_version`. | `POST /api/v1/code-mappings/lookup/` (≤ 1000 entries) | `system/etl.write` | promop#1975, cdew#110, `docs/code-mapping-api.md` |
+| **Disease relevance set**, three tiers (`disease`, `curated`, `common`), versioned, ETag/304 | `GET /api/v1/relevance/?disease=MM` | `system/*.read` | promop#1971, `docs/disease_relevance.md` |
+| **The patient's diseases** + the union of their sets (primary first; `[]` when none supported) | `GET /api/v1/relevance/?person_id=N` | `system/disease.read` (reads diseases only) | promop#1971, cdew#109 |
+| **Absent-from-relevance signals** (aggregate counts, no PHI) and a curator page to accept/reject them | `POST /api/v1/relevance/signals/` (≤ 1000) | `system/etl.write` | promop#1971, #1974 |
+| Bulk upsert per object type; provenance from `X-Provenance-Source`; hospital from `X-Provenance-Organization-ID` | `POST /api/v1/{conditions,…}/` | `system/etl.write` | alignment §2.4–§2.6 |
+| Patient provisioning, email matching, organization | `POST /api/v1/persons/provision/` | `system/etl.write` | alignment §2.5 |
+| *Later:* lines of therapy by regimen name, resolved through promop's regimen taxonomy | `therapy-lines/` (ETL upsert) | `system/etl.write` | promop#1985 |
+
+**Not needed by CDEW:** `system/etl.delete` (new, hard deletes; CDEW retracts with
+`PATCH is_erroneous`), lab sync and FHIR sync (both still relabel service writes).
+
+**Still missing on the promop side:**
+- **Variant origin** (germline/somatic): promop#348 is open, and `genomics.py` still clears
+  `qualifier_concept`.
+- **A genomics receiver** with idempotent import: promop#1245 is open.
+  - Together these block committing genomic findings, not extracting them.
+- **Field metadata for prompts** (new, small ask). cdew#103 wants each relevance concept's value
+  kind, unit, allowed values, and whether promop computes it. The relevance response doesn't carry
+  them, and promop's `writable-fields` descriptor sits behind patient-record permissions. Ask: add
+  those to the relevance concepts, or let `system/*.read` read the deployment-level descriptor.
+
+### Workstreams and order
+
+| # | Workstream | CDEW issue | Depends on | Status |
+|---|---|---|---|---|
+| **D1** | **Patient identity design.** Where the patient's email, organization and source hospital come from: upload form, a CDEW patient record, or FHIR metadata (Phase 8). CDEW stores only a free-form `patient_ref` today. | *to file* | — | **Decide now**; blocks PL, P2b, P5 |
+| **P0** | `ObjectType` catalog + `sync_object_types` (OpenAPI → source schemas; `promop_endpoint`, not `fhir_resource`) | #94 | — | **Ready** |
+| **P1** | `PromptDefinition.object_types`, `PromptVersion` snapshots; migrate `lab_report` / `genetics_report` (+ test samples) | #95 | P0 | **Ready** |
+| **P2** | Prompt composer + tagged-union output; `ExtractionRecord.object_type`; the seams below | #96 | P1 | **Ready** |
+| **P3 / P4** | Taxonomy from promop `doc_type`; lint REGISTRY → synced schemas (absorbs #37's commit gate) | #97, #98, #37 | P0 | **Ready** |
+| **Ad-hoc** | Per-document object selection on a transient version | *to file* | P2 | Ready after P2 |
+| **PL** | Patient link: `patient_ref → person_id` via `persons/provision`, at route time | *to file* | D1, promop service token | After D1 |
+| **P2a** | **Term resolution at staging**: lookup per document, store concept + status per fact | #110 | P2, service token | **promop ready** |
+| **P2b** | Disease relevance: patient diseases → emphasis, pinning, ranking, signals | #109 (+ #103) | PL, P2a, scopes granted | **promop ready** |
+| **P5** | Commit: resolved facts → bulk upsert → `promop_ref`; commit UI | #110, #35 (rescope), #38 | PL, P2a, P4; BAA (#102) + an environment | After PL/P2a |
+| **G** | Genomics commit (variant object per cdew#101) | #101 (PR) | promop#348, #1245 | **Blocked on promop** |
+
+**Order:**
+- **Now:** P0 → P1 → P2. D1 can be decided in parallel, since it is design work only.
+- **Then:** P3, P4 and ad-hoc in any order.
+- **Then:** PL → P2a → P2b → P5.
+- **Last:** G, once promop#348 and #1245 land.
+
+P2a comes before P2b because ranking and the absent-from-relevance counts both need resolved
+concept ids.
+
+**Operational prerequisites (not code):**
+1. **Service application.** promop staff create CDEW's application with `system/etl.write`,
+   `system/*.read` and `system/disease.read` (cdew#109, step 1).
+2. **Token storage.** Keep the token in Secret Manager (#10); never in `.env` in a shared
+   environment.
+3. **An environment to integrate against.** CDEW staging is not provisioned (#4–#14). Locally,
+   promop's own docker-compose can run next to CDEW's.
+4. **BAA (#102)** executed before real PHI reaches Vertex or promop.
+
+### Seams P0–P2 must leave for P2a / P2b
+P2a and P2b should plug in without reworking P0–P2. Concretely:
+
+1. **Catalog (P0): no relevance on `ObjectType`.** promop serves relevance per patient
+   (`?person_id=`) with each concept's `omop_table`, so it arrives per run and is grouped by object
+   type at compose time. This replaces the per-disease `relevance` block sketched in alignment §3.1,
+   and nothing needs syncing into the catalog.
+2. **Composer (P2):** make it a pure function that takes `relevance: RelevanceSet | None`. The set
+   holds promop's concepts: name, synonyms, `omop_table`, `tier`, diseases. When `relevance` is
+   `None`, it emits **no** priority block. Golden-prompt tests pin that output, so turning relevance
+   on in P2b is an additive change with its own goldens. It replaces today's
+   `_extraction_system_prompt` (`prompts/agents.py`).
+3. **Extraction context (P2):** pass the extract stage one context object, `(document,
+   routed_types, relevance=None)`, rather than growing positional arguments on
+   `run_extractor` / `extract_document` (`pipeline/extract.py`). P2b then fills `relevance` from a
+   new step in `service.execute_pipeline`, which keeps stage transitions in `service.py`.
+4. **Review order (P2):** today `review.py` returns records unordered. Add one explicit ordering
+   function (object type, then position in the document). P2b swaps its primary key to relevance
+   band without touching the views.
+5. **Guidance (P1):** the authoring UI labels per-object guidance as *extraction technique*. No
+   relevance or disease phrasing in examples or help text (alignment §7a.4).
+6. **No pre-work needed** for run pinning, `concept_id` / resolution status on records, or the
+   stale flag. Those are nullable additions in P2a/P2b, and cheap migrations.
+7. **Lookup context in the catalog (P0/P1).** The lookup uses unit, value and **specimen** to pick
+   the right LOINC (blood vs urine glucose). `measurement` already extracts unit and value. Add an
+   extraction-only `specimen` field, a CDEW-only extra under alignment §6.1 / 13.2. It is sent to the
+   lookup as context and **never** committed, since promop's measurement has no specimen field.
+8. **Send wording as extracted (P2).** Store the extracted `*_source_value` verbatim, collapsing
+   whitespace only. CDEW must not normalize, alias or "clean up" terms (cdew#110): promop matches
+   case-insensitively, and its curators decide synonyms once for every later document.
+
+### Shared foundation — promop client  *(built with whichever of PL / P2a lands first)*
+- **Client.** A small promop client: base URL + service token from settings, with timeouts and
+  retry with backoff on 5xx and 429.
+- **Test double.** It sits behind a settings-selectable function, mirroring `EXTRACT_FACTS_FN`, so
+  CI uses a deterministic double and **never calls promop**.
+- **Logging.** PHI-safe codes only (`promop_unavailable`, `lookup_failed`, …). Never log terms,
+  values or response bodies; promop does not log terms either.
+
+### PL — Patient link  *(after D1)*
+- **When it runs.** A new step in `service.execute_pipeline` after classify and before extract,
+  which keeps stage transitions in `service.py`. It resolves or provisions `person_id` through
+  `persons/provision` (alignment §8 step 1), using D1's email and organization.
+- **How each answer is handled:**
+  - **200** → store the link.
+  - **409 `claimed`** or **several matches** → route the link to a human. Never auto-link.
+- **Never blocks extraction.** An unlinked document still extracts, just without relevance, with
+  reason `no_link`.
+
+### P2a — Term resolution at staging  *(cdew#110; promop ready)*
+**Prerequisites:** P2 (facts carry `object_type` + verbatim wording); a service token with
+`system/etl.write`.
+
+**Steps:**
+1. **One lookup per document, when facts stage.** Batch every staged fact (≤ 1000 per call):
+   `{source_vocabulary_id: "", source_code: <wording as extracted>, omop_table:
+   <object's omop_target>}`. Add context where the object has it: `source_unit`, `quantity`, and
+   `specimen` (seam 7).
+   - **Fields per type:** measurement → `measurement_source_value` + unit + value + specimen;
+     condition / drug / procedure / observation → their `*_source_value`, plus unit where present.
+2. **Store per fact.** Add `ExtractionRecord.concept_id` (nullable) and `resolution` (`resolved` |
+   `ambiguous` | `unresolved`). Keep the top candidates as review hints only. Record the response's
+   `matcher_version` on the run.
+3. **Review UI.** A resolution badge per fact, with ambiguous candidates shown as hints.
+   - **A CDEW reviewer cannot resolve a term.** Only a promop curator's approval does; the term is
+     already in promop's **Uncoded** queue with its context.
+   - The badge says so, and optionally links to the queue.
+4. **Re-check unresolved facts** on a schedule and when the user opens the document: once a curator
+   approves, the same call resolves.
+   - **Throttle this** (see open item below): every unresolved lookup currently counts as a new
+     "sighting" in promop's queue.
+5. **Tests.** The client double returns resolved, ambiguous and unresolved answers. Assert the
+   request carries the verbatim wording and the context fields, and never logs them.
+
+**Open item for promop:** promop counts a *Seen* sighting each time an unresolved term is looked
+up (#2125). Terms from documents have no per-patient rows, so the count stays provisional and keeps
+growing. CDEW re-checking the same fact would inflate the counts curators use to prioritise. **Ask
+for a non-counting re-check mode**, e.g. `count: false`. Until then, re-check at most daily per term.
+
+**Exit:**
+- Staged facts carry a concept or a resolution state.
+- A curator's approval in promop makes the next re-check resolve.
+- `./ci.sh` passes offline.
+
+### P2b — Disease relevance  *(cdew#109, folds in cdew#103; promop ready)*
+**Prerequisites:**
+- PL, for `person_id`.
+- P2a: ranking and signals need concept ids.
+- CDEW's service application granted `system/disease.read` and `system/*.read`.
+
+**Steps:**
+1. **Read relevance before extraction.** Call `GET /api/v1/relevance/?person_id=N`.
+   - `diseases: []` → no emphasis, reason `no_supported_disease`.
+   - Unlinked patient → `no_link`.
+   - promop error → `promop_unavailable`.
+   - **Never blocks extraction.**
+2. **Snapshot.** A `RelevanceSnapshot` model (`version`, `diseases`, `concepts` JSON, `etag`,
+   `fetched_at`), unique on `(version, diseases)`. Re-reads send `If-None-Match`, and a 304 reuses
+   the snapshot.
+3. **Pin on the run.** `ExtractionJob.relevance_snapshot` — a nullable FK, plus the reason code. A
+   run is re-derivable from `(document, version_id, snapshot)`.
+4. **Composer priority block** (alignment §7a.3). Concepts are grouped per object type by
+   `omop_table`.
+   - **Content:** the `disease` and `curated` tiers are listed as *"always find these if present"*
+     (names + synonyms). The `common` tier is **not** listed: it's general clinical fields, which
+     the base prompt already asks for.
+   - **Wording:** always keep *"also extract every other … fact"*, and never say "only".
+   - **No calculated values.** The existing rule "copy values as written; never infer" already
+     forbids calculating derived values (FLC ratio, FLIPI risk, TNBC status, TP53 disruption) —
+     cdew#103 item 6. Goldens assert that wording.
+5. **Ranking.** The review order becomes: in the set → other resolved → ambiguous/unresolved, with
+   object type as the secondary key (seam 4).
+6. **Stale flag.** A periodic conditional GET with the pinned ETag. A 304 means current; a new
+   version marks the run stale in the UI, with a re-extract action. Per-`(document, version)`
+   idempotency makes the re-run replace rather than duplicate.
+7. **Signals.** A monthly job counts, per disease, the **resolved** concepts absent from the set,
+   with `document_count` / `document_total`. It posts them to `/api/v1/relevance/signals/` with
+   `period = "YYYY-MM"`; re-sending a period updates it.
+   - Send only counts at or above a small minimum (setting, default 3) to keep curators' queue clean.
+   - Aggregates only; no PHI.
+8. **cdew#103 reconciliation.** Disease "profiles" come from the patient through relevance
+   (decision #7), not from authored selection.
+   - Ad-hoc extraction may let a user pick a disease when the patient has none; that is the
+     run-parameter fallback.
+   - #103's richer per-field metadata (value kind, allowed values, units, computed role) waits on the
+     promop field-metadata ask above. When it lands it feeds the priority block, e.g. listing the
+     allowed values for `her2_status`.
+
+**Exit:**
+- A myeloma patient's lab report is extracted with myeloma priorities and every other lab still
+  extracted.
+- The run pins its snapshot.
+- Review lists the relevant facts first.
+- After a version bump the run shows as stale.
+- An unlinked patient's document extracts unchanged, with reason `no_link`.
+- A month's signals post idempotently.
+- `./ci.sh` passes offline.
+
+### P5 — Commit  *(cdew#110 commit half; rescopes #35; with #37, #38)*
+**Prerequisites:** PL, P2a, P4 (commit gate from synced schemas); an environment with promop; BAA
+(#102).
+
+**Steps:**
+1. **What commits.** Only reviewer-approved facts whose lookup is **`resolved: true`**.
+   - Re-check them at commit, since a curator may have re-pointed a mapping. Resolved lookups don't
+     add sightings.
+   - Unresolved approved facts wait as `approved · awaiting_mapping`.
+2. **Bulk upsert per object type.** A list POST to each `promop_endpoint`, one person per batch,
+   with:
+   - `X-Provenance-Source: DOCUMENT_EXTRACTION`;
+   - `X-Provenance-Organization-ID`, from D1's source hospital;
+   - `*_type_concept = 32883`.
+3. **Store the result.** Keep the returned ids as `promop_ref`. A **409** (fact attributed to
+   another hospital) goes to review and is not retried. Upserts make retries safe.
+4. **Commit gate and UI.** The E110 gate comes from the synced schemas (#37 via P4). The commit UI
+   (#38) shows per-fact resolution, push status and `promop_ref`.
+5. **Genomic findings are excluded** until workstream G.
+
+**Exit:**
+- An approved document commits; re-commit is a no-op.
+- Facts read back in promop with `DOCUMENT_EXTRACTION` provenance and the hospital.
+- Unresolved facts are held, not dropped.
+
+### G — Genomics commit  *(blocked on promop#348, #1245)*
+Extraction of variants works today. Committing them waits for promop's genomics receiver
+(promop#1245) and the origin decision (promop#348). Before G starts, review and rebase cdew#101,
+Adam's `genomic_variant` object for the NGS walkthrough, onto the current alignment doc.
+
+### Issue housekeeping  *(do with the first PR of this phase)*
+- **#93 (epic):** rewrite its decisions. FHIR bundle → lookup + bulk upsert; OIDC → `provision`.
+  Add D1, PL, P2a, P2b and G.
+- **#94:** `fhir_resource` → `promop_endpoint`; drop the catalog relevance block; add `specimen`.
+- **#35:** rescope from "FHIR connector" to "P5 bulk-upsert write path", or close it into #110.
+- **#103:** comment that profiles come from `relevance/` per patient (P2b). Keep it open only for
+  the field-metadata ask.
+- **File:** D1 (patient identity design), PL (patient link), ad-hoc extraction, and the promop
+  asks: field metadata, non-counting lookup re-check.
 
 ## Phase 8 — FHIR-sync source  *(later)*
 
