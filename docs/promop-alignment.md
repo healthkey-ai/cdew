@@ -615,6 +615,9 @@ and runs extraction **on that document only**, without authoring anything:
   downstream.
 - Purpose: exploration, gap-filling on a routed document ("also pull procedures from
   this one"), and a low-friction on-ramp before an author formalizes an extractor.
+- *Built (#114, 2026-11-10):* **reviewers** may run it (open question 13.1 settled that way).
+  A re-run of the same pick replaces only its own facts. See `implementation-plan.md` → *Ad-hoc as
+  built*.
 
 ### 6.3 Selection rules
 

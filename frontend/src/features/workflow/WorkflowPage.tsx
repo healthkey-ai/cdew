@@ -231,7 +231,10 @@ export function WorkflowPage() {
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold">{j.document_filename || `doc #${j.document}`}</div>
-                      <div className="font-mono text-xs text-muted-foreground">doc #{j.document}</div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        <span className="font-mono">doc #{j.document}</span>
+                        {j.ad_hoc_object_types && <span> · ad-hoc: {j.ad_hoc_object_types.join(", ")}</span>}
+                      </div>
                     </div>
                   </div>
                   <div>{statusBadge(j.status)}</div>

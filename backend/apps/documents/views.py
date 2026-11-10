@@ -51,7 +51,7 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [HasAnyRole]
 
     def get_permissions(self):
-        if self.action in ("verify", "unverify", "destroy", "geometry", "page_image"):
+        if self.action in ("verify", "unverify", "destroy", "geometry", "page_image", "extract_ad_hoc"):
             return [IsReviewer()]
         if self.action == "patient":
             return [IsAdmin()]
@@ -170,6 +170,40 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                                 "patient_linked_by", "patient_linked_at", "updated_at"])
         logger.info("documents: patient linked doc=%s person=%s", doc.id, doc.person_id)
         return Response(SourceDocumentSerializer(self.get_queryset().get(pk=doc.pk)).data)
+
+    @action(detail=True, methods=["post"], url_path="extract-ad-hoc")
+    def extract_ad_hoc(self, request, pk=None):
+        """Extract this document for the object types a reviewer picks (#114,
+        alignment §6.2): ``{object_types: [...]}``. No authored extractor — the run
+        pins a transient version on the system-owned ``ad_hoc`` definition and is
+        a normal job; its facts join this document's review queue. Earlier facts
+        are untouched. Returns the job (202) for polling."""
+        from apps.pipeline.serializers import ExtractionJobSerializer
+        from apps.prompts.adhoc import AdHocSelectionError, ad_hoc_version
+
+        doc = self.get_object()
+        if not hasattr(doc, "text"):
+            return Response({"detail": "Parse the document before extracting it."}, status=status.HTTP_409_CONFLICT)
+        if doc.jobs.filter(status__in=[JobStatus.QUEUED, JobStatus.RUNNING]).exists():
+            return Response({"detail": "This document is already being processed."}, status=status.HTTP_409_CONFLICT)
+        try:
+            version = ad_hoc_version(request.data.get("object_types"), user=request.user)
+        except AdHocSelectionError as exc:
+            return Response({"detail": "; ".join(f.message for f in exc.findings),
+                             "findings": [{"code": f.code, "message": f.message} for f in exc.findings]},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        job = ExtractionJob.objects.create(document=doc, ad_hoc_version=version, requested_by=request.user)
+        try:
+            dispatch_extract(job.id)
+        except Exception:
+            logger.warning("pipeline: ad-hoc dispatch failed job=%s", job.id)  # safe code only, never PHI
+            job.status, job.stage, job.progress = JobStatus.FAILED, Stage.DONE, 1.0
+            job.errors = [{"code": "dispatch_failed"}]
+            job.finished_at = timezone.now()
+            job.save(update_fields=["status", "stage", "progress", "errors", "finished_at", "updated_at"])
+        job.refresh_from_db()
+        return Response(ExtractionJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=True, methods=["get"])
     def text(self, request, pk=None):

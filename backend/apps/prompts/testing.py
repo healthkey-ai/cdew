@@ -43,7 +43,7 @@ def canned_facts(version, text, *, model=None, document=None) -> list[dict]:
     Object-typed versions get tagged ``measurement`` facts; legacy versions get
     the old json_schema payloads."""
     if getattr(version, "is_object_typed", False):
-        return _canned_measurements(version, text)
+        return _canned_measurements(version, text) + _canned_observations(version, text)
     key = version.definition.key
     facts: list[dict] = []
     if key == "lab_report":
@@ -71,6 +71,21 @@ def canned_facts(version, text, *, model=None, document=None) -> list[dict]:
                     }
                 )
     return facts
+
+
+_SMOKING_RE = re.compile(r"(former|current|never) smoker[^.\n]*", re.IGNORECASE)
+
+
+def _canned_observations(version, text) -> list[dict]:
+    """Tobacco use as an observation (alignment walkthrough 10.6)."""
+    if "observation" not in version.object_types:
+        return []
+    return [{
+        "object_type": "observation",
+        "data": {"observation_source_value": "tobacco use", "value_as_string": m.group(0)},
+        "provenance": {"page": 0, "char_start": m.start(), "char_end": m.end(),
+                       "snippet": m.group(0), "confidence": 0.9},
+    } for m in _SMOKING_RE.finditer(text)]
 
 
 def _canned_measurements(version, text) -> list[dict]:

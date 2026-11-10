@@ -15,6 +15,7 @@ export interface Job {
   errors: { code: string }[];
   stage_history: { stage: string; at: string }[]; // pipeline timeline (#28)
   prefect_flow_run_id: string;
+  ad_hoc_object_types: string[] | null; // ad-hoc extraction (#114); null for routed jobs
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from apps.accounts.permissions import IsPromptAuthor
 from apps.pipeline.models import DryRunJob, JobStatus
 
+from .adhoc import AD_HOC_KEY
 from .lint.linter import lint_version
 from .models import DocumentType, ObjectType, PromptDefinition, PromptKind, PromptTestSample, PromptVersion
 from .serializers import (
@@ -49,7 +50,9 @@ class DocumentTypeViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class PromptDefinitionViewSet(viewsets.ModelViewSet):
-    queryset = PromptDefinition.objects.select_related("active_version").order_by("kind", "key")
+    # The system-owned ad-hoc definition (#114) isn't authored, so it isn't listed.
+    queryset = (PromptDefinition.objects.select_related("active_version")
+                .exclude(key=AD_HOC_KEY).order_by("kind", "key"))
     serializer_class = PromptDefinitionSerializer
     permission_classes = [IsPromptAuthor]
 
@@ -100,7 +103,7 @@ class PromptDefinitionViewSet(viewsets.ModelViewSet):
 class PromptVersionViewSet(
     mixins.RetrieveModelMixin, mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet
 ):
-    queryset = PromptVersion.objects.select_related("definition").all()
+    queryset = PromptVersion.objects.select_related("definition").exclude(definition__key=AD_HOC_KEY)
     serializer_class = PromptVersionSerializer
     permission_classes = [IsPromptAuthor]
 

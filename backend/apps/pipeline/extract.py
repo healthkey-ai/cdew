@@ -17,6 +17,7 @@ from django.utils import timezone
 from django.utils.module_loading import import_string
 
 from apps.documents.models import ExtractionRecord, ExtractionStatus
+from apps.prompts.adhoc import AD_HOC_KEY
 from apps.prompts.agents import _is_multimodal_mime, extract_facts
 from apps.prompts.resolve import resolve_extractors
 
@@ -147,8 +148,13 @@ def run_extractor(context: ExtractionContext, definition, version, *, model=None
 
     with transaction.atomic():
         # Idempotent: re-extract (same version or a newly published one) replaces
-        # this extractor's prior records for the document — never duplicates.
-        ExtractionRecord.objects.filter(document=doc, extractor_key=definition.key).delete()
+        # this extractor's prior records for the document — never duplicates. An
+        # ad-hoc run (#114) replaces only its own version's records, so a second
+        # pick of different object types adds beside the first instead.
+        prior = ExtractionRecord.objects.filter(document=doc, extractor_key=definition.key)
+        if definition.key == AD_HOC_KEY:
+            prior = prior.filter(extractor_version_id=version.id)
+        prior.delete()
         ExtractionRecord.objects.bulk_create(records)
 
     flagged = sum(1 for r in records if r.status == ExtractionStatus.FLAGGED)
