@@ -187,6 +187,8 @@ def derive_object_types(openapi: dict) -> list[dict]:
         commit_required = sorted(
             {spec["primary"]} | (set(component.get("required", [])) & (set(props) - set(spec.get("extraction_only", {}))))
         )
+        all_props = component.get("properties", {})
+        promop_required = sorted(f for f in component.get("required", []) if not all_props.get(f, {}).get("readOnly"))
         out.append({
             "key": key,
             "label": spec["label"],
@@ -203,15 +205,51 @@ def derive_object_types(openapi: dict) -> list[dict]:
             "default_guidance": spec["default_guidance"],
             "extraction_only": sorted(spec.get("extraction_only", {})),
             "commit_required": commit_required,
+            "promop_required": promop_required,
             "promop_schema_version": _fingerprint(component),
             "sort_order": order,
         })
     return out
 
 
+def uncovered_commit_fields(definition: dict) -> list[str]:
+    """Fields promop requires to commit this object type that nothing fills (P4, #98).
+
+    promop's required list is the commit contract. A required field is covered
+    when promop or CDEW's commit fills it — ``person`` and every coded ``*_concept``
+    (promop's lookup and the fixed ``*_type_concept``) — or when CDEW extracts it.
+    Anything else is a field promop now demands that CDEW can't supply.
+    """
+    props = set(definition["source_schema"].get("properties", {}))
+    return [f for f in definition.get("promop_required", [])
+            if f != "person" and not f.endswith("_concept") and f not in props]
+
+
+# ── Document types (P3, #97) ────────────────────────────────────────────────
+
+DOC_TYPE_ENUM = "DocTypeEnum"  # promop's PatientDocument.doc_type
+
+
+def derive_document_types(openapi: dict) -> list[dict]:
+    """promop's document types, ``[{code, label, sort_order}]``, from the OpenAPI
+    enum (drf-spectacular lists ``* `CODE` - Label`` lines in its description)."""
+    try:
+        enum = openapi["components"]["schemas"][DOC_TYPE_ENUM]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"promop OpenAPI has no {DOC_TYPE_ENUM}") from exc
+    labels = {}
+    for line in (enum.get("description") or "").splitlines():
+        code, sep, label = line.strip().lstrip("*").strip().partition(" - ")
+        if sep:
+            labels[code.strip("`")] = label.strip()
+    return [{"code": c, "label": labels.get(c, c.replace("_", " ").title()), "sort_order": i}
+            for i, c in enumerate(enum.get("enum", []))]
+
+
 def trim_openapi(openapi: dict) -> dict:
     """The parts of promop's OpenAPI the catalog reads — the shape of the fixture."""
     out = {"openapi": openapi.get("openapi"), "info": openapi.get("info"), "paths": {}, "components": {"schemas": {}}}
+    out["components"]["schemas"][DOC_TYPE_ENUM] = openapi["components"]["schemas"][DOC_TYPE_ENUM]
     for spec in OVERLAY.values():
         endpoint = spec["promop_endpoint"]
         body = openapi["paths"][endpoint]["post"]["requestBody"]["content"]["application/json"]
@@ -235,5 +273,6 @@ def unguided_fields(definitions: list[dict]) -> dict[str, list[str]]:
 
 SNAPSHOT_FIELDS = (
     "key", "label", "description", "omop_target", "promop_endpoint", "source_schema",
-    "field_guide", "default_guidance", "extraction_only", "commit_required", "promop_schema_version",
+    "field_guide", "default_guidance", "extraction_only", "commit_required", "promop_required",
+    "promop_schema_version",
 )

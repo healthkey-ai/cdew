@@ -50,6 +50,11 @@
     "required": ["concept_name", "drug_concept", "drug_exposure_start_date", "drug_type_concept", "person"],
     "type": "object"
    },
+   "DocTypeEnum": {
+    "description": "* `FISH` - FISH\n* `GEP` - GEP\n* `NGS` - NGS\n* `CYTOMETRY` - Flow Cytometry\n* `CYTOGENETICS` - Cytogenetics\n* `LAB_RESULTS` - Lab Results\n* `FULL_MEDICAL_RECORDS` - Full Medical Records\n* `MRD` - MRD\n* `BONE_MARROW` - Bone Marrow\n* `CONSENT` - Consent\n* `IMAGING` - Imaging\n* `ADVANCE_DIRECTIVE` - Advance Directive\n* `OTHER` - Other",
+    "enum": ["FISH", "GEP", "NGS", "CYTOMETRY", "CYTOGENETICS", "LAB_RESULTS", "FULL_MEDICAL_RECORDS", "MRD", "BONE_MARROW", "CONSENT", "IMAGING", "ADVANCE_DIRECTIVE", "OTHER"],
+    "type": "string"
+   },
    "ProcedureOccurrence": {
     "properties": {
      "concept_name": {"readOnly": true, "type": "string"},

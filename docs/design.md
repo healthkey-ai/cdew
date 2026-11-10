@@ -301,7 +301,8 @@ reproducible.
   payload** schema and optional document metadata; **the system supplies the fixed `facts[…]` +
   `provenance` envelope** (§9), so provenance can't be authored wrong. Guardrails: the authored schema
   must be well-formed JSON Schema, **compile to a valid Pydantic output model** (§10), and pass the
-  **shape-lint** — supported-subset + reserved-field + domain-contract checks — before it can be
+  **shape-lint** — supported-subset + reserved-field checks, and (object-typed) promop's synced
+  commit contract — before it can be
   published. The full rule set and error/warning codes are in
   [`schema-lint.md`](./schema-lint.md); a bad schema can't silently break the agent or the future
   commit mapping.

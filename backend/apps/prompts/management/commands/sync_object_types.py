@@ -1,4 +1,5 @@
-"""Refresh the object catalog from promop's OpenAPI (alignment §5, #94).
+"""Refresh the object catalog and promop's document types from promop's OpenAPI
+(alignment §5, #94, #97).
 
     manage.py sync_object_types                    # live: $PROMOP_BASE_URL/api/v1/schema/
     manage.py sync_object_types --file schema.json # a downloaded schema
@@ -18,7 +19,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from apps.prompts import catalog
-from apps.prompts.models import ObjectType
+from apps.prompts.models import DocumentType, ObjectType
 
 _COMPARED = (*catalog.SNAPSHOT_FIELDS, "sort_order")
 
@@ -64,6 +65,13 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f"! {key}: no longer derived from promop (kept)"))
         for key, fields in catalog.unguided_fields(definitions).items():
             self.stdout.write(self.style.WARNING(f"? {key}: no extraction hint for {', '.join(fields)} (catalog.OVERLAY)"))
+        for d in definitions:
+            uncovered = catalog.uncovered_commit_fields(d)
+            if uncovered:
+                self.stdout.write(self.style.WARNING(
+                    f"! {d['key']}: promop requires {', '.join(uncovered)} to commit, which CDEW can't fill (P4 lint)"))
+
+        self._sync_document_types(openapi, opts["dry_run"], now)
 
         if opts["save_fixture"] and not opts["dry_run"]:
             doc = {"_comment": json.loads(catalog.FIXTURE.read_text()).get("_comment", ""),
@@ -71,6 +79,23 @@ class Command(BaseCommand):
             catalog.FIXTURE.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
             self.stdout.write(f"fixture saved: {catalog.FIXTURE}")
         self.stdout.write(self.style.SUCCESS("dry run — nothing written" if opts["dry_run"] else "catalog synced"))
+
+    def _sync_document_types(self, openapi, dry_run, now):
+        """promop's document types (P3, #97) — what classifier taxonomy types map to."""
+        try:
+            types = catalog.derive_document_types(openapi)
+        except ValueError as exc:
+            raise CommandError(str(exc)) from None
+        existing = {t.code: t for t in DocumentType.objects.all()}
+        for t in types:
+            row = existing.get(t["code"])
+            if row and (row.label, row.sort_order) == (t["label"], t["sort_order"]):
+                continue
+            self.stdout.write(f"{'~' if row else '+'} document type {t['code']}")
+            if not dry_run:
+                DocumentType.objects.update_or_create(code=t["code"], defaults={**t, "synced_at": now})
+        for code in sorted(set(existing) - {t["code"] for t in types}):
+            self.stdout.write(self.style.WARNING(f"! document type {code}: no longer in promop (kept)"))
 
     def _load(self, opts) -> dict:
         if opts["fixture"]:

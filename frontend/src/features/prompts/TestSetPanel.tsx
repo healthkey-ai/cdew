@@ -623,7 +623,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                     onChange={(e) => setExpectedText(e.target.value)}
                     placeholder={
                       isClassifier
-                        ? '["lab_report"]'
+                        ? '["lab_results"]'
                         : '[{ "object_type": "measurement", "measurement_source_value": "…" }]'
                     }
                   />

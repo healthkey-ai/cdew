@@ -331,7 +331,7 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 | **P0** | `ObjectType` catalog + `sync_object_types` (OpenAPI → source schemas; `promop_endpoint`, not `fhir_resource`) | #94 | — | ✅ **Built** (see *P0–P2 as built*) |
 | **P1** | Object types on the extractor version, publish-time snapshots; migrate `lab_report` / `genetics_report` (+ test samples) | #95 | P0 | ✅ **Built** |
 | **P2** | Prompt composer + tagged-union output; `ExtractionRecord.object_type`; the seams below | #96 | P1 | ✅ **Built** |
-| **P3 / P4** | Taxonomy from promop `doc_type`; lint REGISTRY → synced schemas (absorbs #37's commit gate) | #97, #98, #37 | P0 | **Ready** |
+| **P3 / P4** | Taxonomy from promop `doc_type`; lint REGISTRY → synced schemas (absorbs #37's commit gate) | #97, #98, #37 | P0 | ✅ **Built** (see *P3/P4 as built*) |
 | **Ad-hoc** | Per-document object selection on a transient version | #114 | P2 | Ready after P2 |
 | **PL** | Patient link: `patient_ref → person_id` via `persons/provision`, at route time | #113 | D1, promop service token | After D1 |
 | **P2a** | **Term resolution at staging**: lookup per document, store concept + status per fact | #110 | P2, service token | **promop ready** |
@@ -341,7 +341,7 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 
 **Order:**
 - **Done:** P0 → P1 → P2. D1 can be decided in parallel, since it is design work only.
-- **Then:** P3, P4 and ad-hoc in any order.
+- **Then:** P3, P4 (done) and ad-hoc.
 - **Then:** PL → P2a → P2b → P5.
 - **Last:** G, once promop#348 and #1245 land.
 
@@ -408,6 +408,38 @@ concept ids.
 - **Review order.** `review.review_order` is the single ordering point (seam 4).
 - **Review UI.** Object-typed facts show every catalog field and flag missing commit-required ones.
   Manual facts pick an object type.
+
+### P3/P4 as built  *(2026-11-10)*
+
+**P3 — taxonomy from promop's document types (#97).**
+- **Sync.** `prompts.DocumentType` is synced from promop's OpenAPI `DocTypeEnum` (labels from its
+  description) by `sync_object_types`, and seeded from the fixture.
+- **Migration 0011** publishes classifier **v2** and makes it active.
+  - Its taxonomy is the twelve promop document types except `OTHER`, as lower-cased slugs, each
+    naming its `promop_doc_type`.
+  - Plus CDEW's `office_visit` and `immunohistochemistry`, both `OTHER`.
+  - A threshold tuned on a one-to-one type is carried over; an author's own types are kept.
+- **Extractor triggers** are remapped:
+  - `lab_report` → `lab_results`;
+  - `genetics_report` → `fish`, `cytogenetics`, `ngs`, `mrd`, `gep`, `bone_marrow`.
+- **Classifier test-set gold** is relabelled where the mapping is one-to-one. `genetics_report`
+  gold is dropped with a note to re-label, since it split into five types.
+- **No slug aliases.** Every extraction follows a fresh classify, so v1's slugs only label history.
+- **Lint and UI.**
+  - Lint: `E062` (unknown promop document type) and `W111` (none named).
+  - The Taxonomies page has a promop-document-type column.
+
+**P4 — commit contract from promop (#98, absorbs #37).**
+- **REGISTRY retired.** `lint/domain_contracts.py` is deleted. Legacy `json_schema` extractors get
+  structure only, plus `W171`.
+- **The contract.** `ObjectType.promop_required` holds promop's required list.
+  `catalog.uncovered_commit_fields` returns the required fields nothing fills: not `person`, not a
+  coded `*_concept`, and not extracted.
+- **Lint.** An uncovered field is `W101` on a version that selects the type, and `E110` once the
+  type's `commit_enabled` is set. `commit_enabled` is CDEW-owned, never synced, and set in the
+  Django admin when P5 makes the type's commit path live.
+- **Sync** prints the same gap.
+- Today promop's requirements are fully covered, so nothing fires.
 
 ### Seams P0–P2 must leave for P2a / P2b
 P2a and P2b should plug in without reworking P0–P2. Concretely:

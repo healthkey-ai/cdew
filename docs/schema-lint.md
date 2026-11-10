@@ -4,11 +4,13 @@ The gate that decides whether an authored prompt version may be **published** (d
 [§8](./design.md#8-prompt--schema-management-db--ui)). It runs on the `validate` endpoint (advisory,
 on a draft) and as a **hard gate on `publish`**. It returns a list of
 `{ level: error | warning, code, path, message }`; **any `error` blocks publish**, warnings do not
-(except domain warnings once the commit phase is enabled — §6).
+(except a commit-contract warning once that object type's commit path is live — §5).
 
-The lint has three jobs: keep authored schemas inside a **Pydantic-compilable subset**, guarantee the
-**fixed output envelope + provenance** the pipeline depends on, and check each fact payload against its
-**domain contract** so the future commit mapping (design §12) has what it needs.
+The lint has three jobs:
+- keep legacy authored schemas inside a **Pydantic-compilable subset**;
+- guarantee the **fixed output envelope + provenance** the pipeline depends on;
+- check each targeted object type against **promop's commit contract**, synced from promop's own
+  schema (§5), so the commit (P5) has what it needs.
 
 ---
 
@@ -135,37 +137,39 @@ hard rule is enforced by the type.
 
 ---
 
-## 5. Layer 4 — extractor domain contract
+## 5. Layer 4 — promop's commit contract *(P4, #98, #37)*
 
-*Legacy `json_schema` extractors only.* Object-typed extractors (§5a) get their contract from the
-synced catalog instead: promop's required source fields become `ObjectType.commit_required`, which
-P4 (#98) turns into the commit gate.
+The contract is **promop's own**, not a hand-kept registry. The hand-maintained per-domain
+`domain_contracts.py` REGISTRY and its codes (`W102`, `E111`) are retired.
 
-Beyond structure, each fact's `data` must carry the fields the domain needs downstream. The contract
-is keyed by the definition's `domain` and lives in a small extensible registry —
-[`backend/apps/prompts/lint/domain_contracts.py`](../backend/apps/prompts/lint/domain_contracts.py)
-(`REGISTRY`; each entry a `DomainContract` of `required` / `required_any_of` / `recommended` `Field`s
-+ a `commit_enabled` toggle). In **v1 these are warnings**; when the commit phase (design §12) is
-enabled for a domain (`commit_enabled=True`), its `required` fields become **errors** (`E110`) so
-nothing un-mappable reaches promop. The table below mirrors that module.
+**Where it comes from.** `sync_object_types` stores each object type's whole OpenAPI `required` list
+as `ObjectType.promop_required`.
 
-| Domain | Required (`data.*`) | Recommended | Controlled enum |
-|--------|---------------------|-------------|-----------------|
-| `labs` | `test_name:string`, `value:number\|string`, `unit:string` | `clinical_code`, `ref_low`, `ref_high`, `abnormal_flag`, `collected_date:date` | `abnormal_flag` ∈ {`H`,`L`,`N`,`A`,`AA`,`HH`,`LL`} |
-| `genetics` | one of `abnormality`/`gene`:string, `result:string` | `method`, `clone_fraction`, `high_risk:boolean`, `mapping_code` | `method` ∈ {`FISH`,`NGS`,`MRD`} |
-| `imaging` | `modality:string`, and `impression:string` **or** ≥1 ordinal finding | `study_date`, `body_region`, `mapping` | ordinal `status` ∈ {`Absent`,`Decreasing`,`Stable`,`Progressing`} |
-| `conditions` | `name:string` | `icd10`/`snomed`, `onset_date:date`, `status` | `status` ∈ {`active`,`remission`,`resolved`,`suspected`} |
-| `medications` | `drug:string` | `dose`, `route`, `start_date`, `end_date`, `status` | `status` ∈ {`active`,`completed`,`stopped`,`intended`} |
-| `procedures` | `name:string` | `cpt`/`snomed`, `date:date` | — |
+**What counts as covered.** A required field is covered when:
+- promop's coder fills it (every coded `*_concept`, including the fixed `*_type_concept`);
+- the commit fills it (`person`); or
+- CDEW extracts it (the field is in the type's `source_schema`).
+
+**What the lint checks.** For each object type an extractor version selects, any required field that
+nothing fills is a finding. It means promop now demands something CDEW can't supply. `sync_object_types`
+reports the same gap when it syncs.
+
+**When it becomes an error.** `ObjectType.commit_enabled` is CDEW-owned and never synced; it is set in
+the Django admin. It is flipped when a type's commit path goes live (P5) — the per-type switch #37
+asked for. From then on the warning is an **error**, so nothing un-committable is published.
 
 | Code | Level | Rule |
 |------|-------|------|
-| `W101` | warn (→ `E110` at commit) | A domain **required** field is absent from the `data` schema. |
-| `W102` | warn | A field named like a controlled enum lacks an `enum`, or its `enum` includes values outside the domain-standard set. |
-| `W110` | warn | An `enum`/field the prompt or classifier relies on has no `description`. |
-| `E111` | error | `domain` is not a known domain in the registry (typo / unsupported). |
+| `W101` | warn (→ `E110` once the type's `commit_enabled`) | promop requires a field to commit this object type that neither promop nor CDEW fills. |
+| `E110` | error | The same, for an object type whose commit path is live. |
 
-*(The `data` schema may add any other author-defined fields; the contract only asserts the minimum.)*
+Legacy `json_schema` extractors have no object type, so there is no promop contract to check them
+against; they get structure (layers 1–3) and `W171` (§5a). *Retired:* `W102` (domain enums) and
+`E111` (unknown domain), with the REGISTRY.
+
+*Commit-required **values** are a per-fact matter, not a lint one.* A fact missing, say, its
+`measurement_date` is flagged at review ("needed to commit") and is held at commit (P5); the
+extraction never forces the model to invent it.
 
 ---
 
@@ -206,7 +210,13 @@ taxonomy.
 |------|-------|------|
 | `E060` | error | A `type` is empty or not a unique slug (`^[a-z][a-z0-9_]*$`), or duplicated. |
 | `E061` | error | `threshold` missing or outside `[0, 1]`. |
+| `E062` | error | `promop_doc_type` names a document type promop doesn't have (checked against the synced `DocumentType`s). |
 | `W110` | warn | A `type` has an empty `prompt` (`description` accepted as legacy; the classifier leans on it). |
+| `W111` | warn | A `type` names no `promop_doc_type`; it will count as promop's `OTHER`. |
+
+Each type names the promop document type (`PatientDocument.doc_type`) it corresponds to (P3, #97).
+promop's types are synced into `DocumentType` with the object catalog. CDEW's own additions where
+promop is thin (`office_visit`, `immunohistochemistry`) use `OTHER`.
 
 ---
 
@@ -245,8 +255,8 @@ Checked at publish across the active registry (definitions version independently
   "findings": [
     { "level": "error",   "code": "E011", "path": "data.observations",
       "message": "object must set additionalProperties: false" },
-    { "level": "warning", "code": "W101", "path": "data",
-      "message": "labs domain: required field 'unit' is absent" }
+    { "level": "warning", "code": "W101", "path": "object_types[0]",
+      "message": "promop requires 'measurement_datetime' to commit a measurement, and CDEW doesn't extract it" }
   ]
 }
 ```
@@ -258,7 +268,10 @@ Checked at publish across the active registry (definitions version independently
 
 ## 10. Examples
 
-### Passes — a `labs` `data` schema
+*The schema examples below are for **legacy** `json_schema` extractors (layers 1–3). An object-typed
+version has no authored schema; it passes when it selects known catalog types (§5a, §5).*
+
+### Passes — a legacy lab `data` schema
 
 ```jsonc
 {
@@ -281,7 +294,7 @@ Checked at publish across the active registry (definitions version independently
 ### Fails
 
 ```jsonc
-// E011 (open object) + E012 (oneOf) + E040 (reserved 'provenance') + W101 (no 'unit')
+// E011 (open object) + E012 (oneOf) + E040 (reserved 'provenance') + W171 (legacy schema)
 {
   "type": "object",
   "properties": {
@@ -310,9 +323,7 @@ Checked at publish across the active registry (definitions version independently
 
 - The lint is **advisory on save, enforcing on publish** — authors iterate freely on a draft, then
   fix errors to publish. Warnings surface in the editor and the dry-run panel (§8.3) but never block.
-- The **domain contract registry** (§5,
-  [`domain_contracts.py`](../backend/apps/prompts/lint/domain_contracts.py)) and **template-variable
-  allowlist** (§7) are code-owned config, not author-editable — they define what "FHIR/OMOP-shaped" and
-  "well-formed prompt" mean and evolve with the commit phase.
-- Turning a domain's `W101` into `E110` is the switch flipped per domain when its commit path
-  (design §12) goes live.
+- The **commit contract** (§5) comes from promop, synced; the **template-variable allowlist** (§7)
+  is code-owned config. Neither is author-editable.
+- Turning an object type's `W101` into `E110` is `ObjectType.commit_enabled`, flipped in the Django
+  admin per type when its commit path (P5) goes live (#37).

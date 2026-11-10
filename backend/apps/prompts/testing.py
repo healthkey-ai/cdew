@@ -6,13 +6,18 @@ Not used in production.
 """
 from .agents import TypeScore
 
+# Keyed by the promop-aligned taxonomy slugs (P3, #97); a slug the active
+# taxonomy lacks is ignored by apply_taxonomy.
 _KEYWORDS = {
-    "lab_report": ["hemoglobin", "sodium", "g/dl", "mmol", "mg/dl", "wbc", "platelet", "creatinine", "calcium"],
-    "genetics_report": ["fish", "ngs", "mrd", "del(17p)", "t(4;14)", "mutation", "karyotype"],
-    "bone_marrow_biopsy": ["bone marrow", "aspirate", "plasma cell"],
-    "imaging_report": ["pet-ct", "pet/ct", "ct scan", "mri", "radiograph", "lesion", "imaging"],
+    "lab_results": ["hemoglobin", "sodium", "g/dl", "mmol", "mg/dl", "wbc", "platelet", "creatinine", "calcium"],
+    "fish": ["fish", "del(17p)", "t(4;14)"],
+    "ngs": ["ngs", "mutation", "variant allele"],
+    "mrd": ["mrd", "minimal residual"],
+    "cytogenetics": ["karyotype", "cytogenetic"],
+    "bone_marrow": ["bone marrow", "aspirate", "plasma cell"],
+    "imaging": ["pet-ct", "pet/ct", "ct scan", "mri", "radiograph", "lesion", "imaging"],
     "office_visit": ["assessment", "plan:", "follow-up", "office visit", "chief complaint"],
-    "flow_cytometry": ["flow cytometry", "immunophenotyp", "cd138"],
+    "cytometry": ["flow cytometry", "immunophenotyp", "cd138"],
     "immunohistochemistry": ["immunohistochemistry", " ihc", "stain positive"],
 }
 

@@ -92,6 +92,27 @@ class PromptAuthoringTests(APITestCase):
         codes = {f["code"] for f in r.json()["findings"]}
         assert r.json()["ok"] is True and {"W170", "W172"} <= codes
 
+    def test_classifier_publish_checks_promop_doc_types(self):
+        # P3 (#97): a taxonomy type naming a document type promop doesn't have blocks publish.
+        classifier = PromptDefinition.objects.get(kind="classifier")
+        r = self.client.post(f"/api/v1/prompts/definitions/{classifier.id}/versions/", {}, format="json")
+        draft = r.json()
+        taxonomy = [*draft["taxonomy"], {"type": "pathology", "prompt": "Pathology", "threshold": 0.5,
+                                         "promop_doc_type": "PATHOLOGY"}]
+        self._patch(draft, taxonomy=taxonomy)
+        r = self._publish(draft)
+        assert r.status_code == 400
+        assert "E062" in {f["code"] for f in r.json()["lint"]["findings"]}
+        taxonomy[-1].pop("promop_doc_type")
+        self._patch(draft, taxonomy=taxonomy)
+        r = self._publish(draft)
+        assert r.status_code == 200  # W111 warns, doesn't block
+
+    def test_document_types_listed(self):
+        r = self.client.get("/api/v1/prompts/document-types/")
+        assert r.status_code == 200
+        assert {"code": "LAB_RESULTS", "label": "Lab Results"} in r.json()
+
     def test_object_types_listed_for_any_role(self):
         reviewer = _user("rev2@x.org", [Role.REVIEWER])
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(reviewer).access_token}")

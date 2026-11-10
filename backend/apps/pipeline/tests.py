@@ -80,7 +80,7 @@ class LlmTaskTests(TestCase):
 
         doc = _doc()
         parse_document(doc)
-        assert classify_task.fn(doc.id) == ["lab_report"]
+        assert classify_task.fn(doc.id) == ["lab_results"]
 
     def test_extract_one_task_fn_creates_records(self):
         from apps.documents.models import ExtractionRecord
@@ -245,7 +245,7 @@ class ClassifyDocumentTests(TestCase):
         dc = classify_document(doc)
         doc.refresh_from_db()
         assert dc.outcome == ClassificationOutcome.ROUTED
-        assert "lab_report" in dc.routed_types
+        assert "lab_results" in dc.routed_types
         assert dc.classifier_version_id == get_active_classifier().id
         assert doc.status == DocumentStatus.CLASSIFIED
 

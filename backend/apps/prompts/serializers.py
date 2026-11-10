@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from apps.pipeline.models import DryRunJob
 
-from .models import ObjectType, PromptDefinition, PromptTestSample, PromptVersion
+from .models import DocumentType, ObjectType, PromptDefinition, PromptTestSample, PromptVersion
 
 
 class DryRunJobSerializer(serializers.ModelSerializer):
@@ -23,9 +23,16 @@ class ObjectTypeSerializer(serializers.ModelSerializer):
         model = ObjectType
         fields = (
             "key", "label", "description", "omop_target", "promop_endpoint", "source_schema",
-            "field_guide", "default_guidance", "extraction_only", "commit_required",
-            "promop_schema_version", "synced_at",
+            "field_guide", "default_guidance", "extraction_only", "commit_required", "promop_required",
+            "commit_enabled", "promop_schema_version", "synced_at",
         )
+        read_only_fields = fields
+
+
+class DocumentTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DocumentType
+        fields = ("code", "label")
         read_only_fields = fields
 
 

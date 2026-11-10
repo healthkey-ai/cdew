@@ -16,7 +16,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from pydantic import ValidationError
 
 from .agents import build_extraction_output_model
-from .catalog import derive_object_types, load_fixture, trim_openapi, unguided_fields
+from .catalog import derive_document_types, derive_object_types, load_fixture, trim_openapi, unguided_fields
 from .compose import compose_extraction_prompt
 from .models import ObjectType
 
@@ -221,6 +221,64 @@ class OutputModelTests(SimpleTestCase):
         with pytest.raises(ValidationError):
             Output.model_validate({"facts": [{"object_type": "drug", "data": {"measurement_source_value": "Hb"},
                                               "provenance": PROV}]})
+
+
+class DocumentTypeTests(TestCase):
+    """P3 (#97): promop's document types, synced like the object catalog."""
+
+    PROMOP = ["FISH", "GEP", "NGS", "CYTOMETRY", "CYTOGENETICS", "LAB_RESULTS", "FULL_MEDICAL_RECORDS", "MRD",
+              "BONE_MARROW", "CONSENT", "IMAGING", "ADVANCE_DIRECTIVE", "OTHER"]
+
+    def test_derived_with_labels(self):
+        types = derive_document_types(load_fixture())
+        assert [t["code"] for t in types] == self.PROMOP
+        assert {t["code"]: t["label"] for t in types}["CYTOMETRY"] == "Flow Cytometry"
+
+    def test_seeded_and_synced(self):
+        from .models import DocumentType
+
+        assert list(DocumentType.objects.values_list("code", flat=True)) == self.PROMOP
+        api = copy.deepcopy(load_fixture())
+        api["components"]["schemas"]["DocTypeEnum"]["enum"].append("PATHOLOGY")
+        with mock.patch("builtins.open", mock.mock_open(read_data=json.dumps(api))):
+            out = StringIO()
+            call_command("sync_object_types", "--file", "schema.json", stdout=out)
+        assert "+ document type PATHOLOGY" in out.getvalue()
+        assert DocumentType.objects.get(code="PATHOLOGY").label == "Pathology"
+
+    def test_missing_enum_fails_loudly(self):
+        api = copy.deepcopy(load_fixture())
+        del api["components"]["schemas"]["DocTypeEnum"]
+        with pytest.raises(ValueError):
+            derive_document_types(api)
+
+    def test_sync_warns_when_promop_requires_what_cdew_cant_fill(self):
+        api = copy.deepcopy(load_fixture())
+        api["components"]["schemas"]["DrugExposure"]["required"].append("drug_exposure_start_datetime")
+        with mock.patch("builtins.open", mock.mock_open(read_data=json.dumps(api))):
+            out = StringIO()
+            call_command("sync_object_types", "--file", "schema.json", stdout=out)
+        assert "! drug: promop requires drug_exposure_start_datetime to commit" in out.getvalue()
+        assert "drug_exposure_start_datetime" in ObjectType.objects.get(key="drug").promop_required
+
+    def test_commit_enabled_survives_a_sync(self):
+        ObjectType.objects.filter(key="measurement").update(commit_enabled=True)
+        call_command("sync_object_types", "--fixture", stdout=StringIO())
+        assert ObjectType.objects.get(key="measurement").commit_enabled is True
+
+
+class TaxonomyMigrationTests(SimpleTestCase):
+    mig = importlib.import_module("apps.prompts.migrations.0011_promop_aligned_taxonomy")
+
+    def test_old_slugs_map_onto_promop_types(self):
+        assert self.mig._remap(["lab_report"]) == ["lab_results"]
+        assert self.mig._remap(["genetics_report", "bone_marrow_biopsy"]) == [
+            "fish", "cytogenetics", "ngs", "mrd", "gep", "bone_marrow"]
+        assert self.mig._remap(["my_custom_type"]) == ["my_custom_type"]  # an author's own type is kept
+
+    def test_taxonomy_covers_promop_except_other(self):
+        codes = {code for _, code, _ in self.mig.TAXONOMY}
+        assert set(DocumentTypeTests.PROMOP) - codes == set()  # OTHER is used by the CDEW additions
 
 
 class LegacySampleConversionTests(SimpleTestCase):

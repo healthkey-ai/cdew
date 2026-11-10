@@ -56,6 +56,8 @@ export interface ObjectType {
   default_guidance: string;
   extraction_only: string[];
   commit_required: string[];
+  promop_required?: string[]; // promop's whole required list — the commit contract (P4)
+  commit_enabled?: boolean; // this type's commit path is live (P5)
   promop_schema_version: string;
 }
 
@@ -68,6 +70,20 @@ export const isObjectTyped = (v: Pick<PromptVersion, "object_types" | "json_sche
  * are `{object_type, ...data}` rows, so test-set gold is a list of those. */
 export const factRow = (f: { object_type?: string; data: Record<string, unknown> }) =>
   f.object_type ? { object_type: f.object_type, ...f.data } : f.data;
+
+/** One of promop's document types (P3, #97) — what a taxonomy type maps to. */
+export interface DocumentType {
+  code: string; // e.g. LAB_RESULTS
+  label: string;
+}
+
+export function useDocumentTypes() {
+  return useQuery({
+    queryKey: KEYS.documentTypes,
+    queryFn: async () => (await api.get<DocumentType[]>(`${P}/document-types/`)).data,
+    staleTime: 5 * 60_000,
+  });
+}
 
 /** The object catalog — read by authors (selection) and reviewers (manual facts). */
 export function useObjectTypes() {

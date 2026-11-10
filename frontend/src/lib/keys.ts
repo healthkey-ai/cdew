@@ -14,5 +14,6 @@ export const KEYS = {
   patientSearch: (q: string) => ["patients", "search", q] as const,
   promptDefinitions: ["prompts", "definitions"] as const,
   objectTypes: ["prompts", "object-types"] as const,
+  documentTypes: ["prompts", "document-types"] as const,
   promptVersions: (id: number) => ["prompts", "definitions", id, "versions"] as const,
 };
