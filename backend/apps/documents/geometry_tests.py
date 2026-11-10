@@ -110,6 +110,34 @@ class BboxMappingTests(TestCase):
         assert box["page"] == 1  # the data row, not the p2 prose
         assert [r[0] for r in box["rects"]] == [0.03, 0.20, 0.30]  # TSH · value · range
 
+    def test_object_typed_fact_anchors_on_its_source_value(self):
+        """Object-typed facts (promop alignment P2) name their row in the type's
+        primary field — measurement_source_value here — not `test_name`. On OCR
+        tokens with table-border noise ("|") the row is still found."""
+        from types import SimpleNamespace
+
+        from apps.documents.geometry.mapping import record_to_bbox
+
+        words = ["|", "Hemoglobin", "|", "13.2", "|", "g/dL", "|", "12.0-15.5", "|"]
+        tokens = [{"page": 1, "text": w, "bbox": [round(0.02 + i * 0.08, 5), 0.30, round(0.09 + i * 0.08, 5), 0.32]}
+                  for i, w in enumerate(words)]
+        rec = SimpleNamespace(
+            payload={"measurement_source_value": "Hemoglobin", "value_as_number": 13.2, "unit_source_value": "g/dL"},
+            provenance={"snippet": "Hemoglobin 13.2 g/dL 12.0-15.5", "bbox": None},
+        )
+        box = record_to_bbox(rec, tokens)
+        assert box["page"] == 1
+        assert [t["text"] for t in tokens if t["bbox"] in box["rects"]][0] == "Hemoglobin"
+        assert tokens[3]["bbox"] in box["rects"]  # the value is in the highlighted row
+
+    def test_snippet_fallback_ignores_punctuation_only_ocr_tokens(self):
+        from apps.documents.geometry.mapping import snippet_to_bbox
+
+        tokens = [{"page": 1, "text": t, "bbox": [i / 10, 0.1, i / 10 + 0.05, 0.12]}
+                  for i, t in enumerate(["former", "|", "smoker,", "—", "quit", "2019"])]
+        box = snippet_to_bbox("former smoker, quit 2019", tokens)
+        assert box == {"page": 1, "rects": [tokens[i]["bbox"] for i in (0, 2, 4, 5)]}
+
     def test_record_to_bbox_falls_back_to_snippet_without_name(self):
         from types import SimpleNamespace
 

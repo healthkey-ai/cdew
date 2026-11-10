@@ -22,8 +22,15 @@ import re
 
 logger = logging.getLogger("apps.documents")
 
-# Payload fields that read like a row label, in preference order.
-_NAME_KEYS = ("test_name", "name", "label", "analyte", "title", "description", "code")
+# Payload fields that read like a row label, in preference order: each catalog
+# object type's primary field (promop alignment P0, genomics G), then the legacy
+# json_schema extractors' names. A measurement's value/unit `*_source_value`
+# fields are deliberately absent — they aren't labels.
+_NAME_KEYS = (
+    "measurement_source_value", "observation_source_value", "condition_source_value",
+    "drug_source_value", "procedure_source_value", "gene", "assay_name",
+    "test_name", "name", "label", "analyte", "title", "description", "code",
+)
 # Row grouping: tokens whose y-centers are within this are the same visual row.
 _ROW_TOL = 0.012
 # An alphabetic token longer than this, seen after the value, is descriptive
@@ -50,16 +57,24 @@ def _yc(token: dict) -> float:
     return (b[1] + b[3]) / 2
 
 
+def _wordlike(text: str) -> bool:
+    """A token that carries letters or digits — not OCR noise such as the "|" a
+    table border reads as, or a lone dash."""
+    return any(ch.isalnum() for ch in text)
+
+
 def snippet_to_bbox(snippet: str, tokens: list[dict]) -> dict | None:
-    """Find a contiguous run of tokens matching the snippet's words on one page.
-    Returns ``{"page": n, "rects": [[x0,y0,x1,y1], …]}`` (normalized) or None."""
-    words = [w for w in (_norm(w) for w in (snippet or "").split()) if w]
+    """Find a contiguous run of tokens matching the snippet's words on one page,
+    ignoring punctuation-only tokens on both sides (OCR noise). Returns
+    ``{"page": n, "rects": [[x0,y0,x1,y1], …]}`` (normalized) or None."""
+    words = [w for w in (_norm(w) for w in (snippet or "").split()) if w and _wordlike(w)]
     if not words:
         return None
 
     by_page: dict[int, list[dict]] = {}
     for t in tokens:
-        by_page.setdefault(t["page"], []).append(t)
+        if _wordlike(_norm(t["text"])):
+            by_page.setdefault(t["page"], []).append(t)
 
     n = len(words)
     for page, toks in by_page.items():
@@ -176,8 +191,11 @@ def populate_bboxes(doc) -> int:
     if geom is None:
         return 0
     tokens = geom.tokens or []
-    updated = sum(map_record(rec, tokens) for rec in ExtractionRecord.objects.filter(document=doc))
-    logger.info("geometry: mapped bboxes doc=%s records=%s", doc.id, updated)
+    records = list(ExtractionRecord.objects.filter(document=doc))
+    updated = sum(map_record(rec, tokens) for rec in records)
+    located = sum(1 for rec in records if (rec.provenance or {}).get("bbox"))
+    logger.info("geometry: mapped bboxes doc=%s located=%s/%s changed=%s",
+                doc.id, located, len(records), updated)
     return updated
 
 
