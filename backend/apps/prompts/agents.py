@@ -24,13 +24,38 @@ class ClassificationOutput(BaseModel):
     scores: list[TypeScore] = Field(default_factory=list)
 
 
+def _uses_anthropic() -> bool:
+    return (settings.LLM_PROVIDER or "").strip().lower() == "anthropic"
+
+
+def resolve_model_name(version) -> str:
+    """The model a run uses: the version's pinned ``model`` when it belongs to the
+    deployment's provider family (``claude-*`` on Anthropic, anything else on
+    Gemini), otherwise ``settings.LLM_MODEL``. Seeded versions pin a Gemini model,
+    so a Claude-only deployment must not try to call Gemini for them."""
+    pinned = (getattr(version, "model", "") or "").strip()
+    if pinned and pinned.startswith("claude") == _uses_anthropic():
+        return pinned
+    return settings.LLM_MODEL
+
+
 def default_model(version):
-    """Build the Pydantic AI model for this version (design §10). Vertex / Google
-    Cloud (BAA) via ADC in staging/prod; the Gemini API (GLA, API key) in dev.
-    Provider names per pydantic-ai: ``google-cloud`` (Vertex) / ``google`` (GLA)."""
+    """Build the Pydantic AI model for this version (design §10).
+
+    ``LLM_PROVIDER=anthropic``: Claude through the Anthropic API (the hk-labs
+    setup on Render). Otherwise Gemini: Vertex / Google Cloud (BAA) via ADC in
+    staging/prod, or the Gemini API (GLA, API key) in dev. Provider names per
+    pydantic-ai: ``google-cloud`` (Vertex) / ``google`` (GLA).
+    """
+    name = resolve_model_name(version)
+    if _uses_anthropic():
+        from pydantic_ai.models.anthropic import AnthropicModel
+        from pydantic_ai.providers.anthropic import AnthropicProvider
+
+        return AnthropicModel(name, provider=AnthropicProvider(api_key=settings.ANTHROPIC_API_KEY or None))
+
     from pydantic_ai.models.google import GoogleModel
 
-    name = version.model or settings.LLM_MODEL
     if settings.GEMINI_BACKEND == "vertex":
         from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 
@@ -49,10 +74,30 @@ def _model_settings(version):
     """Sampling settings for a run (design §10, #50). Greedy decoding (temperature
     0) with a fixed seed by default so re-running the same version over the same
     document yields stable facts; overridable per version via ``params``
-    (``temperature``, ``seed``, ``top_p``, ``top_k``, ``max_tokens``)."""
+    (``temperature``, ``seed``, ``top_p``, ``top_k``, ``max_tokens``).
+
+    On Claude these sampling knobs don't exist (current models reject
+    temperature/top_p/top_k with a 400, and there is no seed): runs use adaptive
+    thinking with an optional effort level (``params.effort`` or LLM_EFFORT) and a
+    generous ``max_tokens``. Thinking is set explicitly so pydantic-ai never
+    forces a tool choice — forced tool use is rejected while thinking is on, and
+    Claude models think by default.
+    """
+    params = version.params or {}
+    if _uses_anthropic():
+        from pydantic_ai.models.anthropic import AnthropicModelSettings
+
+        kwargs = {
+            "max_tokens": params.get("max_tokens", settings.LLM_MAX_TOKENS),
+            "anthropic_thinking": {"type": "adaptive"},
+        }
+        effort = params.get("effort") or settings.LLM_EFFORT
+        if effort:
+            kwargs["anthropic_effort"] = effort
+        return AnthropicModelSettings(**kwargs)
+
     from pydantic_ai.models.google import GoogleModelSettings
 
-    params = version.params or {}
     kwargs = {
         "temperature": params.get("temperature", settings.LLM_TEMPERATURE),
         "seed": params.get("seed", settings.LLM_SEED),

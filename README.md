@@ -164,28 +164,34 @@ npm run dev        # http://localhost:5173  (proxies /api → http://localhost:8
 
 ## Deploy — Render staging
 
-CDEW deploys **independently, like PRISM** (#31 Part C), from [`render.yaml`](./render.yaml):
+CDEW deploys **independently, like PRISM** (#31 Part C). [`render.yaml`](./render.yaml) is the
+reference configuration (validated with `render blueprints validate render.yaml`):
 - **Web service:** one container (`cdew`) built from the root [`Dockerfile`](./Dockerfile). It
   serves the Django API and the built SPA from the same origin.
 - **Database:** CDEW's **own** Postgres (`cdew-db`, no external access).
+- **No GCP.** Like hk-labs on Render:
+  - the LLM is **Claude via the Anthropic API** (`LLM_PROVIDER=anthropic`, `LLM_MODEL=claude-opus-5`);
+  - uploaded originals live on a **Render persistent disk** (`MEDIA_ROOT=/var/data/media`), so
+    the service runs one instance with no zero-downtime deploys;
+  - DocAI geometry OCR is off.
 
-> **PHI gate.** Until a BAA-covered (HIPAA-enabled) Render workspace and the Google BAA for
-> Vertex/DocAI (#102) are in place, staging takes **synthetic documents only**.
+> **PHI gate.** Until BAA-covered Render (a HIPAA-enabled workspace) and Anthropic setups are in
+> place, staging takes **synthetic documents only**.
 
-**First-time setup** (dashboard):
-1. **New → Blueprint**, then pick this repo. Render reads `render.yaml`.
-2. **Fill the `sync: false` values** it prompts for:
-   - `GOOGLE_CLOUD_PROJECT`
-   - `GS_BUCKET_NAME`: a private GCS bucket for uploaded originals
-   - `PARTNER_AUTH_ISSUERS`: JSON; see `backend/.env.example`
-   - `FIREBASE_*`: optional
-   - `DOCAI_PROCESSOR_ID`: optional
-3. **Add the GCP credential.** On the `cdew` service, add a **Secret File** named
-   `gcp-service-account.json` holding the GCP service account (Vertex, DocAI, GCS).
-   `GOOGLE_APPLICATION_CREDENTIALS` already points at `/etc/secrets/gcp-service-account.json`.
-4. **Create a first admin** from the service **Shell**:
-   `python manage.py bootstrap_dev --email you@healthtree.org --roles admin`. Give it a strong
-   `--password`. Staff then sign in through promop, phr or Firebase, and the admin grants their roles.
+**How staging was created.** Through the Render API, not a dashboard Blueprint: the API can't
+create Blueprints. Steps:
+1. `POST /v1/postgres` creates `cdew-db`.
+2. `POST /v1/services` creates `cdew`, with the env vars, disk, pre-deploy command and
+   `autoDeployTrigger` matching `render.yaml`. Notable values:
+   - `DATABASE_URL` is the database's internal connection string;
+   - `SECRET_KEY` is generated;
+   - `ANTHROPIC_API_KEY` is the hk-labs key;
+   - `PARTNER_AUTH_ISSUERS` trusts promop staging's family auth.
+3. A one-off job runs `bootstrap_dev` to create the first admin. Staff then sign in through promop
+   (or phr / Firebase when configured), and the admin grants their roles.
+
+Changes to `render.yaml` are therefore **not** synced automatically: apply them with the API or the
+dashboard, or connect the file as a Blueprint later.
 
 **Deploys.** `autoDeployTrigger: checksPass` deploys each push to `dev` only **after its GitHub CI
 checks pass**:

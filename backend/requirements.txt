@@ -16,7 +16,11 @@ google-cloud-documentai>=2.24,<4      # geometry OCR (token bboxes + page images
 prefect>=3.0,<4.0                     # per-document flow; self-hosted on GCP (staging), local pool (dev)
 
 # ── LLM (Phase 3) ── gemini via Pydantic AI; model-agnostic, typed structured output
-pydantic-ai-slim[google]>=0.0.14
+pydantic-ai-slim[google,anthropic]>=2.5,<3   # Gemini (Vertex/GLA) or Claude (Anthropic API)
+# pydantic-ai 2.5 builds Anthropic requests for the 0.x SDK: anthropic 1.x+ moved to
+# httpx2 and changed BetaMessageParam, which breaks it. Lift this pin together with
+# a pydantic-ai upgrade.
+anthropic>=0.108,<1
 
 # ── Auth ── partner sign-in via promop, phr or Firebase (design §11, #31)
 firebase-admin>=6.5,<7.0             # Firebase ID-token verification (org-owned Firebase)

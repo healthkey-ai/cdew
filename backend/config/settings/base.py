@@ -141,7 +141,9 @@ WHITENOISE_IMMUTABLE_FILE_TEST = _immutable_file
 # Storage precedence (design §2): GCS (GS_BUCKET_NAME) → S3 (AWS_STORAGE_BUCKET_NAME)
 # → local FileSystem (dev only). Private ACLs + short-lived signed URLs.
 MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# Local-filesystem storage root (no bucket configured). On Render this is the
+# persistent disk (MEDIA_ROOT=/var/data/media) so originals survive deploys.
+MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "media")))
 
 GS_BUCKET_NAME = env("GS_BUCKET_NAME", default="")
 GS_PROJECT_ID = env("GS_PROJECT_ID", default="")
@@ -206,13 +208,23 @@ DOCUMENT_UPLOAD_ACCEPTED_MIME_TYPES = (
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ── LLM config (design §10) — gemini via Pydantic AI ────────────────────────
-# Fully configurable: LLM_PROVIDER/LLM_MODEL are the global defaults; each
-# published PromptVersion may override the model per version (Phase 3+).
-# Access is per-environment: Vertex AI (BAA) in staging/prod, Generative
-# Language API (API key) in local dev. Keys/creds server-side only.
+# ── LLM config (design §10) — Pydantic AI over Gemini or Claude ─────────────
+# LLM_PROVIDER picks the provider for the whole deployment: "gemini" (Vertex AI
+# or the Generative Language API) or "anthropic" (Claude via the Anthropic API —
+# the hk-labs setup on Render, no GCP needed). LLM_MODEL is the default model.
+# A PromptVersion's pinned `model` is honoured only when it belongs to the active
+# provider's family, so seeded gemini-pinned versions still run on a Claude
+# deployment. Keys/creds server-side only.
 LLM_PROVIDER = env("LLM_PROVIDER", default="gemini")
 LLM_MODEL = env("LLM_MODEL", default="gemini-2.5-flash")
+# Claude (LLM_PROVIDER=anthropic). Current Claude models reject temperature /
+# top_p / top_k and have no seed, so the sampling settings below don't apply;
+# reasoning depth is set with LLM_EFFORT instead (low|medium|high|xhigh|max;
+# empty → the API default). LLM_MAX_TOKENS bounds each response, thinking
+# included — keep it generous so long extractions aren't truncated.
+ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
+LLM_EFFORT = env("LLM_EFFORT", default="")
+LLM_MAX_TOKENS = env.int("LLM_MAX_TOKENS", default=16000)
 # Generative Language API (google-gla) — dev.
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
 # Vertex AI (google-vertex) — staging/prod (service account via ADC).
