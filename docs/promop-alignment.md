@@ -299,7 +299,7 @@ Patients never use CDEW; staff process documents **on their behalf**.
 
 | Case | How CDEW gets `person_id` | Organization |
 |---|---|---|
-| **Existing** patient, staff signed in **via promop** | The staff member picks the patient from promop **with their own family token**. promop applies that user's access rules; CDEW's service token never reads patient records. This settles 13.5. | From the chosen Person |
+| **Existing** patient, staff signed in **via promop** | The staff member picks the patient from promop **with their own family token**. promop applies that user's access rules; CDEW's service token never reads patient records. This settles 13.5. **Built for admins:** CDEW searches `GET /api/v1/patient-records/?search=` and reads each hit's email from the detail `GET …/patient-records/{person_id}/` (design §11.1). | From the chosen Person |
 | **Existing** patient, staff signed in **via phr or Firebase** | No promop credential to delegate. D1 picks one: (a) link the staff identity to a promop account; (b) a narrow patient-search grant for CDEW's service token; or (c) email match via `persons/provision`, with 409 → human. | From the chosen Person |
 | A **new** patient | `persons/provision` with email + organization; a 409 goes to a human (§8 step 1) | Given on provision |
 
@@ -318,7 +318,10 @@ details now, FHIR metadata in Phase 8 — never from anyone's sign-in.
 - **Add CDEW's audience** to `FAMILY_AUTH_AUDIENCE`.
 - **Settle the `org` claim.** The phr doc says promop-hosted tokens carry `org`; promop's
   `family-auth.md` lists no `org`.
-- **Name the patient-search endpoint** for the user-delegated picker.
+- **Name the patient-search endpoint** for the user-delegated picker. CDEW uses `patient-records`
+  for now. Its list has no email, so the picker makes one detail call per hit (up to 10), and each
+  returns the full clinical record. A slim search returning `person_id`, name, email and
+  organization would replace those calls.
 
 ---
 

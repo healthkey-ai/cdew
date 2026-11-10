@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, Trash2, UploadCloud } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, Trash2, UploadCloud, UserRound } from "lucide-react";
 
 import {
   AlertDialog,
@@ -15,9 +15,25 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMe } from "@/features/auth/api";
+import {
+  type DirectoryPatient,
+  type DirectoryStatus,
+  directoryErrorDetail,
+  useAssignPatient,
+  usePatientDirectory,
+} from "@/features/patients/api";
+import { PatientPicker } from "@/features/patients/PatientPicker";
 import { useJob } from "@/features/pipeline/api";
 import { cn } from "@/lib/utils";
 import {
@@ -58,15 +74,28 @@ function buildPages(cur: number, total: number): (number | "…")[] {
   return pages;
 }
 
-/** Drop-zone hero: drag-and-drop or pick a file, tagged with a patient ref. */
-function UploadHero({ patientRef, setPatientRef }: { patientRef: string; setPatientRef: (v: string) => void }) {
+/** Drop-zone hero: drag-and-drop or pick a file, tagged with a patient — picked
+ * from the directory (admins signed in via promop, #31 Part B) or a free-text ref. */
+function UploadHero({
+  patientRef,
+  setPatientRef,
+  directory,
+}: {
+  patientRef: string;
+  setPatientRef: (v: string) => void;
+  directory: DirectoryStatus | undefined;
+}) {
   const qc = useQueryClient();
   const [jobId, setJobId] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [patient, setPatient] = useState<DirectoryPatient | null>(null);
+  const [manual, setManual] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const upload = useUploadDocument();
   const job = useJob(jobId);
   const jobStatus = job.data?.status;
+  const canPick = Boolean(directory?.host && directory.connected);
+  const picking = canPick && !manual;
 
   useEffect(() => {
     if (jobStatus === "completed") {
@@ -80,12 +109,12 @@ function UploadHero({ patientRef, setPatientRef }: { patientRef: string; setPati
 
   const doUpload = (file?: File | null) => {
     if (!file) return;
-    if (!patientRef.trim()) {
-      toast.error("Enter a patient ref first");
+    if (picking ? !patient : !patientRef.trim()) {
+      toast.error(picking ? "Pick a patient first" : "Enter a patient ref first");
       return;
     }
     upload.mutate(
-      { file, patientRef: patientRef.trim() },
+      picking ? { file, personId: patient!.person_id } : { file, patientRef: patientRef.trim() },
       {
         onSuccess: (d) => {
           setJobId(d.job_id ?? null);
@@ -93,7 +122,7 @@ function UploadHero({ patientRef, setPatientRef }: { patientRef: string; setPati
           toast.info(d.deduplicated ? "Deduplicated to existing document" : "Uploaded — processing…");
           qc.invalidateQueries({ queryKey: ["documents"] });
         },
-        onError: () => toast.error("Upload failed"),
+        onError: (err) => toast.error(directoryErrorDetail(err) ?? "Upload failed"),
       },
     );
   };
@@ -136,16 +165,91 @@ function UploadHero({ patientRef, setPatientRef }: { patientRef: string; setPati
         </Button>
       </div>
 
-      <div className="mx-auto mt-4 flex max-w-xs items-center justify-center gap-2">
-        <span className="text-xs text-muted-foreground">Patient ref</span>
-        <Input
-          className="h-8 w-40 bg-background"
-          value={patientRef}
-          onChange={(e) => setPatientRef(e.target.value)}
-          placeholder="PT-001"
-        />
-      </div>
+      {picking ? (
+        <div className="mx-auto mt-4 flex max-w-lg items-center justify-center gap-2">
+          <span className="shrink-0 text-xs text-muted-foreground">Patient</span>
+          <PatientPicker value={patient} onChange={setPatient} className="flex-1" />
+          <button
+            type="button"
+            className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline"
+            onClick={() => setManual(true)}
+          >
+            Enter a ref
+          </button>
+        </div>
+      ) : (
+        <div className="mx-auto mt-4 flex max-w-md items-center justify-center gap-2">
+          <span className="text-xs text-muted-foreground">Patient ref</span>
+          <Input
+            className="h-8 w-40 bg-background"
+            value={patientRef}
+            onChange={(e) => setPatientRef(e.target.value)}
+            placeholder="PT-001"
+          />
+          {canPick && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+              onClick={() => setManual(false)}
+            >
+              Search patients
+            </button>
+          )}
+        </div>
+      )}
+      {directory?.host && !directory.connected && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Sign in again with {directory.host} to pick patients from its directory.
+        </p>
+      )}
     </div>
+  );
+}
+
+/** Assign an inbox document to a directory patient (admins, #31 Part B). */
+function AssignPatientDialog({ doc, onClose }: { doc: SourceDocument | null; onClose: () => void }) {
+  const [patient, setPatient] = useState<DirectoryPatient | null>(null);
+  const assign = useAssignPatient();
+
+  const close = () => {
+    setPatient(null);
+    onClose();
+  };
+  const confirm = () => {
+    if (!doc || !patient) return;
+    assign.mutate(
+      { documentId: doc.id, personId: patient.person_id },
+      {
+        onSuccess: () => {
+          toast.success("Patient assigned");
+          close();
+        },
+        onError: (err) => toast.error(directoryErrorDetail(err) ?? "Assign failed"),
+      },
+    );
+  };
+
+  return (
+    <Dialog open={doc !== null} onOpenChange={(open) => !open && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Assign patient</DialogTitle>
+          <DialogDescription>
+            Link “{doc?.original_filename || (doc ? `doc#${doc.id}` : "")}” to a patient. Currently{" "}
+            <span className="font-mono">{doc?.patient_ref}</span>.
+          </DialogDescription>
+        </DialogHeader>
+        <PatientPicker value={patient} onChange={setPatient} autoFocus inlineResults />
+        <DialogFooter>
+          <Button variant="outline" onClick={close}>
+            Cancel
+          </Button>
+          <Button disabled={!patient || assign.isPending} onClick={confirm}>
+            {assign.isPending ? "Assigning…" : "Assign"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -156,11 +260,16 @@ export function InboxPage() {
   const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
   const [toDelete, setToDelete] = useState<SourceDocument | null>(null);
+  const [toAssign, setToAssign] = useState<SourceDocument | null>(null);
 
   const docs = useDocuments(undefined, tab === "all" ? undefined : tab, page);
   const del = useDeleteDocument();
   const me = useMe();
-  const canDelete = (me.data?.roles ?? []).some((r) => r === "reviewer" || r === "admin");
+  const roles = me.data?.roles ?? [];
+  const canDelete = roles.some((r) => r === "reviewer" || r === "admin");
+  const isAdmin = roles.includes("admin");
+  const directory = usePatientDirectory(isAdmin);
+  const canAssign = Boolean(directory.data?.host && directory.data.connected);
 
   const rows = docs.data?.results ?? [];
   const count = docs.data?.count ?? 0;
@@ -182,7 +291,7 @@ export function InboxPage() {
 
   return (
     <section className="space-y-8">
-      <UploadHero patientRef={patientRef} setPatientRef={setPatientRef} />
+      <UploadHero patientRef={patientRef} setPatientRef={setPatientRef} directory={directory.data} />
 
       {/* Recent activity */}
       <div>
@@ -210,7 +319,7 @@ export function InboxPage() {
         </div>
 
         {/* column headers */}
-        <div className="mt-4 grid grid-cols-[1fr_8rem_10rem_1fr_11.5rem] gap-3 border-b px-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="mt-4 grid grid-cols-[1fr_8rem_10rem_1fr_17rem] gap-3 border-b px-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           <span>Document Name &amp; ID</span>
           <span>Date Added</span>
           <span>Status</span>
@@ -233,7 +342,7 @@ export function InboxPage() {
               return (
                 <div
                   key={d.id}
-                  className="grid cursor-pointer grid-cols-[1fr_8rem_10rem_1fr_11.5rem] items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
+                  className="grid cursor-pointer grid-cols-[1fr_8rem_10rem_1fr_17rem] items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
                   onClick={() => navigate(`/inbox/${d.id}`)}
                 >
                   <div className="flex min-w-0 items-center gap-3">
@@ -242,7 +351,10 @@ export function InboxPage() {
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold">{d.original_filename || `doc#${d.id}`}</div>
-                      <div className="font-mono text-xs text-muted-foreground">{d.patient_ref}</div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {d.patient_name && <span className="font-medium text-foreground/80">{d.patient_name} · </span>}
+                        <span className="font-mono">{d.patient_ref}</span>
+                      </div>
                     </div>
                   </div>
                   <div className="text-sm text-muted-foreground">{timeAgo(d.created_at)}</div>
@@ -273,6 +385,17 @@ export function InboxPage() {
                     >
                       <Eye className="size-4" /> View
                     </Button>
+                    {canAssign && !d.verified && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-muted-foreground"
+                        title="Assign to a patient"
+                        onClick={() => setToAssign(d)}
+                      >
+                        <UserRound className="size-4" /> Patient
+                      </Button>
+                    )}
                     {canDelete && (
                       <Button
                         variant="ghost"
@@ -344,6 +467,8 @@ export function InboxPage() {
           </div>
         )}
       </div>
+
+      <AssignPatientDialog doc={toAssign} onClose={() => setToAssign(null)} />
 
       <AlertDialog open={toDelete !== null} onOpenChange={(open) => !open && setToDelete(null)}>
         <AlertDialogContent>

@@ -480,6 +480,15 @@ Staff upload and review documents **for** a patient, chosen per document (design
 - **Existing patients** come from a promop patient picker, using the staff member's own promop
   sign-in so promop's access rules apply. Staff signed in via phr or Firebase need the fallback D1
   chooses.
+  - **Built (admins):** at a promop password sign-in, CDEW keeps the admin's promop token pair
+    sealed server-side (`accounts.PartnerCredential`, refreshed under a row lock because promop
+    rotates refresh tokens; dropped at sign-out). `GET /api/v1/patients/?search=` searches promop
+    `patient-records` as that admin and returns person id, name, email and organization.
+  - **Assigning.** On the inbox, an admin picks the patient at upload (`person_id`) or assigns an
+    existing unverified document (`POST /documents/{id}/patient/`). The server re-checks the patient
+    with promop as that admin, then sets `patient_ref = promop:<person_id>`, `person_id`,
+    `patient_name`, and the linking admin and time. The email is shown, never stored.
+  - An issuer gets the picker by setting `patients_url` in `PARTNER_AUTH_ISSUERS`.
 - **New patients** are provisioned with email + organization.
 - **Organization scope.** Staff act only for organizations they are allowed: promop's grants when
   signed in via promop, CDEW-local grants otherwise.

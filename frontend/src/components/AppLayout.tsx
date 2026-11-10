@@ -6,6 +6,7 @@ import { LogOut, Moon, Sun } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useHealth, useMe } from "@/features/auth/api";
+import { api } from "@/lib/api";
 import { authStore } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -27,8 +28,14 @@ export function AppLayout() {
   const isAdmin = roles.includes("admin");
 
   const signOut = () => {
-    authStore.clear();
-    qc.clear();
+    // Best effort: drop the promop session CDEW keeps for an admin's patient picker (#31 Part B).
+    void api
+      .post("/auth/logout/")
+      .catch(() => undefined)
+      .finally(() => {
+        authStore.clear();
+        qc.clear();
+      });
   };
 
   return (

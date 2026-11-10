@@ -84,6 +84,28 @@ engine — **Chandra OCR** (Datalab) or **DeepSeek-OCR** — evaluated on repres
 
 ## promop alignment
 
+### Patient picker — what's left after the admin slice
+
+**Status:** admin picker built (design §11.1) · **Tracked in:**
+[cdew#31](https://github.com/healthkey-ai/cdew/issues/31) Part B and
+[cdew#112](https://github.com/healthkey-ai/cdew/issues/112).
+
+**Built:** an admin signed in with a promop password searches promop patients with their own
+token, then picks one at upload or assigns an inbox document.
+
+**Still open:**
+- **A slim promop search (promop#2405).** promop's list has no email, so each search makes up to
+  10 detail calls, and each returns a full clinical record. Switch once promop ships a search that
+  returns only person id, name, email and organization.
+- **Reviewers, not just admins.** Part B's acceptance names reviewers. Widening means keeping the
+  promop session for reviewers too.
+- **Staff signed in via phr, Firebase or a local account** have no promop credential, so they
+  get no picker. That fallback is a D1 decision.
+- **New patients** via `persons/provision`, organization scope, and the upload attestation
+  (#31 Part B, items 1–3).
+- **Promote `person_id` / `patient_ref` to a `Patient` / `PatientLink` model** when D1 settles
+  the model.
+
 ### P2b — Disease relevance (second mapping layer)
 
 **Status:** deferred · **Priority:** after P0–P2 · **Tracked in:**

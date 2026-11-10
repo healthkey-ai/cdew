@@ -5,7 +5,10 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.accounts.permissions import HasAnyRole, IsReviewer
+from apps.accounts.permissions import HasAnyRole, IsAdmin, IsReviewer
+from apps.patients import directory
+from apps.patients.directory import DirectoryError
+from apps.patients.views import directory_error_response
 from apps.pipeline.dispatch import dispatch_extract, dispatch_geometry
 from apps.pipeline.models import ExtractionJob, JobStatus, Stage
 
@@ -21,6 +24,24 @@ from .serializers import (
 logger = logging.getLogger("apps.documents")
 
 
+def _directory_patient(request):
+    """The directory patient named by ``request.data["person_id"]``, looked up as
+    the requesting admin — or the error ``Response`` to return."""
+    try:
+        person_id = int(str(request.data.get("person_id") or "").strip())
+    except ValueError:
+        person_id = 0
+    if person_id <= 0:
+        return Response({"detail": "person_id must be a positive integer."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        patient = directory.lookup(request.user, person_id)
+    except DirectoryError as exc:
+        return directory_error_response(exc)
+    if patient is None:
+        return Response({"detail": "No such patient in your directory."}, status=status.HTTP_400_BAD_REQUEST)
+    return patient
+
+
 class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     """List/retrieve documents; upload via POST; read parsed text via /text/;
     delete via DELETE (reviewer-gated)."""
@@ -32,6 +53,8 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     def get_permissions(self):
         if self.action in ("verify", "unverify", "destroy", "geometry", "page_image"):
             return [IsReviewer()]
+        if self.action == "patient":
+            return [IsAdmin()]
         return super().get_permissions()
 
     def perform_destroy(self, instance):
@@ -66,8 +89,13 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         return qs
 
     def create(self, request):
-        """Upload a document (multipart: file, patient_ref). Ingest, then dispatch
-        the extract-document flow (which parses; classify/extract added in Phase 3/4).
+        """Upload a document (multipart: file, and patient_ref or person_id).
+        Ingest, then dispatch the extract-document flow (which parses;
+        classify/extract added in Phase 3/4).
+
+        ``person_id`` (admins only) names a patient from the admin's directory
+        (#31 Part B); it is confirmed with the directory before ingest, so a
+        patient outside the admin's access can't be attached.
 
         Returns 201 for a new document, 200 when deduplicated to an existing one.
         With the `local` dispatch backend the flow runs synchronously, so the
@@ -79,8 +107,17 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         if uploaded is None:
             return Response({"detail": "file is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        patient = None
+        if str(request.data.get("person_id") or "").strip():
+            if not request.user.is_admin:
+                return Response({"detail": "Only admins can pick a directory patient."},
+                                status=status.HTTP_403_FORBIDDEN)
+            patient = _directory_patient(request)
+            if isinstance(patient, Response):
+                return patient
+
         try:
-            doc, created = ingest_upload(uploaded, patient_ref, author=request.user)
+            doc, created = ingest_upload(uploaded, patient_ref, author=request.user, patient=patient)
         except IngestError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -110,6 +147,29 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         data["deduplicated"] = not created
         data["job_id"] = job_id
         return Response(data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def patient(self, request, pk=None):
+        """Assign the document to a directory patient (admin-gated, #31 Part B):
+        ``{person_id}``, confirmed with the admin's directory. Not once verified —
+        the reviewed facts were approved for the current patient."""
+        doc = self.get_object()
+        if doc.verified_at is not None:
+            return Response({"detail": "Unverify the document before changing its patient."},
+                            status=status.HTTP_409_CONFLICT)
+        patient = _directory_patient(request)
+        if isinstance(patient, Response):
+            return patient
+        clash = (SourceDocument.objects.filter(patient_ref=patient["patient_ref"], sha256=doc.sha256)
+                 .exclude(pk=doc.pk).first())
+        if clash is not None:
+            return Response({"detail": f"This patient already has this document (doc#{clash.pk})."},
+                            status=status.HTTP_409_CONFLICT)
+        doc.link_patient(patient, by=request.user)
+        doc.save(update_fields=["patient_ref", "person_id", "patient_name",
+                                "patient_linked_by", "patient_linked_at", "updated_at"])
+        logger.info("documents: patient linked doc=%s person=%s", doc.id, doc.person_id)
+        return Response(SourceDocumentSerializer(self.get_queryset().get(pk=doc.pk)).data)
 
     @action(detail=True, methods=["get"])
     def text(self, request, pk=None):

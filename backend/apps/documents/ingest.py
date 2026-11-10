@@ -58,8 +58,14 @@ def sniff_mime(content: bytes, filename: str, declared: str | None = None) -> st
     return by_ext or declared or "application/octet-stream"
 
 
-def ingest_upload(uploaded_file, patient_ref: str, author=None) -> tuple[SourceDocument, bool]:
-    """Create (or dedup to) a SourceDocument. Returns (doc, created)."""
+def ingest_upload(uploaded_file, patient_ref: str, author=None, patient: dict | None = None) -> tuple[SourceDocument, bool]:
+    """Create (or dedup to) a SourceDocument. Returns (doc, created).
+
+    ``patient`` is a directory patient an admin picked (``patients.directory``);
+    it supplies the patient_ref and is recorded as the document's patient link.
+    """
+    if patient is not None:
+        patient_ref = patient["patient_ref"]
     if not patient_ref:
         raise IngestError("patient_ref is required.")
 
@@ -92,6 +98,8 @@ def ingest_upload(uploaded_file, patient_ref: str, author=None) -> tuple[SourceD
         author=author if getattr(author, "is_authenticated", False) else None,
         status=DocumentStatus.RECEIVED,
     )
+    if patient is not None:
+        doc.link_patient(patient, by=doc.author)
     doc.file.save(doc.original_filename or f"{sha}", ContentFile(raw), save=False)
     doc.save()
     logger.info("ingest: created doc=%s mime=%s bytes=%d patient=%s", doc.id, mime, size, patient_ref)

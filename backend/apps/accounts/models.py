@@ -130,6 +130,10 @@ class Identity(AbstractBaseUser, PermissionsMixin):
     def has_role(self, role: str) -> bool:
         return self.role_assignments.filter(role=role).exists()
 
+    @property
+    def is_admin(self) -> bool:
+        return self.is_superuser or self.has_role(Role.ADMIN)
+
     def __str__(self):
         return self.email or f"{self.issuer}|{self.sub}"
 
@@ -160,3 +164,29 @@ class RoleAssignment(models.Model):
 
     def __str__(self):
         return f"{self.identity} → {self.role}"
+
+
+class PartnerCredential(models.Model):
+    """An admin's token pair from a promop/phr password sign-in, kept server-side
+    so CDEW can call that host *as them* — the patient picker (#31 Part B), where
+    the host's own access rules decide which patients they see.
+
+    Both tokens are sealed (``sealing.py``) and never leave the server or reach
+    the logs. One row per identity, replaced on each sign-in and removed on
+    sign-out or when the host rejects the refresh token.
+    """
+
+    identity = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="partner_credential"
+    )
+    host_key = models.CharField(max_length=64)  # PARTNER_AUTH_ISSUERS[].key
+    access_token = models.TextField()   # sealed
+    refresh_token = models.TextField()  # sealed
+    access_expires_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "partner_credential"
+
+    def __str__(self):
+        return f"{self.identity} @ {self.host_key}"

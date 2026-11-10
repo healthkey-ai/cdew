@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.core",
     "apps.documents",
+    "apps.patients",
     "apps.pipeline",
     "apps.prompts",
 ]
@@ -298,9 +299,12 @@ PIPELINE_AUTO_CLASSIFY = env.bool("PIPELINE_AUTO_CLASSIFY", default=False)
 #   PARTNER_AUTH_PROVIDERS=apps.accounts.providers.jwks.JwksTokenProvider,apps.accounts.providers.firebase.FirebaseTokenProvider
 PARTNER_AUTH_PROVIDERS = env.list("PARTNER_AUTH_PROVIDERS", default=[])
 # Trusted JWKS issuers (promop family auth, phr installations), a JSON list of
-#   {"key", "label", "issuer", "jwks_url", "login_url"?, "audience"?}
+#   {"key", "label", "issuer", "jwks_url", "login_url"?, "audience"?, "patients_url"?}
 # `login_url` (the host's family-auth `login/`) puts a sign-in option on CDEW's
 # login page; without it the issuer is only accepted via token exchange.
+# `patients_url` (promop: `…/api/v1/patient-records/`) gives admins who sign in
+# through that host the patient picker, searched with their own token (#31 Part B).
+# `refresh_url` / `logout_url` default to `login_url`'s siblings.
 def _json_env(name, default):
     """JSON from the environment. Unset or blank → ``default`` (a dashboard may
     store an untouched secret as ""); malformed JSON fails startup loudly."""
@@ -321,6 +325,7 @@ PARTNER_AUTH_ISSUERS = _json_env("PARTNER_AUTH_ISSUERS", [])
 PARTNER_AUTH_CACHE_TTL = env.int("PARTNER_AUTH_CACHE_TTL", default=60)
 PARTNER_AUTH_JWKS_CACHE_TTL = env.int("PARTNER_AUTH_JWKS_CACHE_TTL", default=3600)
 PARTNER_AUTH_LOGIN_TIMEOUT = env.int("PARTNER_AUTH_LOGIN_TIMEOUT", default=10)
+PATIENT_DIRECTORY_TIMEOUT = env.int("PATIENT_DIRECTORY_TIMEOUT", default=10)
 # Org-owned Firebase (FirebaseTokenProvider). FIREBASE_WEB_CONFIG is the public
 # web config ({apiKey, authDomain, projectId, …}) the login page uses for Google
 # sign-in; the service account (if any) is FIREBASE_CREDENTIALS_JSON.
