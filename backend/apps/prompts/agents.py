@@ -79,9 +79,11 @@ def _model_settings(version):
     On Claude these sampling knobs don't exist (current models reject
     temperature/top_p/top_k with a 400, and there is no seed): runs use adaptive
     thinking with an optional effort level (``params.effort`` or LLM_EFFORT) and a
-    generous ``max_tokens``. Thinking is set explicitly so pydantic-ai never
-    forces a tool choice — forced tool use is rejected while thinking is on, and
-    Claude models think by default.
+    generous ``max_tokens``. Adaptive thinking is set explicitly so the request
+    doesn't depend on pydantic-ai's per-model defaults. It is compatible with the
+    forced tool choice pydantic-ai uses for structured output (budget-based extended
+    thinking is not); models that reject forcing outright are handled by
+    pydantic-ai's profiles.
     """
     params = version.params or {}
     if _uses_anthropic():

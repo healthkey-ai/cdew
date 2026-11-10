@@ -99,13 +99,12 @@ class AnthropicRequestShapeTests(SimpleTestCase):
         self.assertEqual(sent["model"], "claude-opus-5")
         self.assertEqual(sent["max_tokens"], 16000)
         self.assertEqual(sent["thinking"], {"type": "adaptive"})
-        # Current Claude models reject sampling params and forced tool use with thinking.
+        # Current Claude models reject sampling params with a 400.
         for removed in ("temperature", "top_p", "top_k"):
             self.assertNotIn(removed, {k for k, v in sent.items() if not _is_omit(v)})
-        # Omitted (the API then defaults to auto) or explicit auto — never forced (any/tool).
-        tool_choice = sent.get("tool_choice")
-        if not _is_omit(tool_choice):
-            self.assertEqual(tool_choice, {"type": "auto"})
+        # The structured-output tool is offered. A forced tool_choice is fine here:
+        # adaptive thinking (unlike budget-based extended thinking) allows it on claude-opus-5.
+        self.assertIn("final_result", [t["name"] for t in sent["tools"]])
 
 
 def _is_omit(value) -> bool:

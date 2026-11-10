@@ -70,6 +70,9 @@ services:
       - key: LLM_PROVIDER
         value: anthropic
       - key: LLM_MODEL
+        # claude-opus-5 / claude-sonnet-5 are safe with the pinned pydantic-ai 2.32.2.
+        # Don't switch to claude-opus-5-5 or claude-fable-5-1 without upgrading it:
+        # they reject the forced tool_choice it uses for structured output.
         value: claude-opus-5
       - key: ANTHROPIC_API_KEY
         sync: false
