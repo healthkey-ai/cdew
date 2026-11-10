@@ -92,7 +92,7 @@ Standalone service, three processes plus the OMOP store it eventually writes to:
 | Orchestration | **Prefect** | Per-document flow; retries, concurrency limits, observability, future scheduling (§6). |
 | Doc parsing | **markitdown** | PDF/DOCX/XLSX/PPTX/image/HTML → Markdown text (§5). Geometry engine deferred (§9). |
 | LLM | **gemini via Pydantic AI** | Agents with typed, validated structured output; model-agnostic; `gemini-2.5-flash` default (Vertex AI for PHI). §10. |
-| Auth | promop family auth | Internal CDM admin users sign in with promop accounts (promop's family-auth RS256 tokens); local roles (§11). |
+| Auth | Partner auth (hk-labs pattern) | Internal CDM admin users sign in with an org's **Firebase** or a **promop-hosted** account (family-auth RS256 tokens), exchanged for a CDEW JWT; local roles (§11). |
 | Storage | GCS → S3 → local, private ACLs, signed URLs | PHI: immutable originals + parsed text in the protected store. |
 
 ---
@@ -427,14 +427,27 @@ structured output natively, supports tools/retries, and is async-native for the 
 ## 11. Auth & users
 
 Users are the **internal CDM validation team** (admin tooling), not patients. Auth is **hybrid**:
-identity comes from **promop, the HealthKey family's identity host**, while **role grants are managed
-locally** in this service.
-- **Identity.** CDEW accepts promop's family-auth access tokens (RS256, verified against promop's
-  JWKS, `iss` = promop's origin, `aud` = CDEW) through `PartnerAuthentication`. They map onto the
-  house OIDC `Identity` (`AUTH_USER_MODEL`, keyed `(issuer, sub)`) (#31).
-- **No Firebase.** Per the family identity architecture (phr `docs/identity-architecture.md`),
-  there is no Firebase anywhere in the HealthKey family.
-- *Revised 2026-11-09; this previously planned Firebase ID-tokens via the `hk-identity` package.* A local role table assigns **reviewer** (verify/approve), **prompt-author** (manage
+identity comes from the user's **identity host**, while **role grants are managed locally** in this
+service. CDEW follows **hk-labs' partner-auth pattern** (`hk-labs` `backend/apps/accounts/`) and
+supports the identity modes of the family architecture (phr `docs/identity-architecture.md`):
+
+| Identity host | Token | Provider |
+|---|---|---|
+| **promop-hosted** (the family default) | promop's family-auth RS256 access token (`iss` = promop's origin), verified against promop's JWKS | `PhrTokenProvider` with `PHR_ISSUER` / `PHR_JWKS_URL` pointed at promop, as promop's `docs/family-auth.md` tells siblings |
+| **Org-owned Firebase** | a Firebase ID token (`iss` = `https://securetoken.google.com/<project>`), verified by `firebase-admin` | `FirebaseTokenProvider` |
+| **Local** (dev, admin-provisioned accounts) | CDEW's own SimpleJWT | — |
+
+- **Routing.** `PartnerAuthentication` routes each bearer token to the provider whose
+  `can_handle` matches its unverified `iss`, verifies it, and maps the claims to the house OIDC
+  `Identity` (`AUTH_USER_MODEL`, unique on `(issuer, sub)`).
+- **Exchange.** The first sign-in auto-provisions the Identity. The frontend exchanges a partner
+  token for a CDEW JWT pair at `POST /api/v1/auth/partner-token/` (#31).
+- **Firebase.** "No Firebase anywhere in the HealthKey family" means HealthKey runs none of its
+  own; an **org-owned** Firebase is a supported mode.
+- *Revised 2026-11-09. This originally planned Firebase via `hk-identity`; an interim edit wrongly
+  dropped Firebase.*
+
+A local role table assigns **reviewer** (verify/approve), **prompt-author** (manage
 prompts/schemas/taxonomy, §8), and **admin** (roles + config), edited via an admin UI. DRF
 `IsAuthenticated` (identity) + per-role permission gates (local roles). This keeps sign-in central
 while letting validation own its own role assignments.
@@ -442,9 +455,9 @@ while letting validation own its own role assignments.
 **Accounts are admin-provisioned — there is no self-service sign-up.** An admin creates a local
 identity and grants/edits its roles through the **Users** admin screen (`/api/v1/auth/users/`,
 admin-gated: list · create with email+password+roles · `PATCH …/{id}/roles/`). The login screen is
-the only unauthenticated surface. Sign-in with a promop account works through
-`PartnerAuthentication` once wired (#31). A new promop identity gets **no** CDEW roles until an
-admin grants them; promop's own role claims are never auto-granted.
+the only unauthenticated surface. Sign-in with a promop-hosted or Firebase account works through
+`PartnerAuthentication` once wired (#31). An auto-provisioned identity gets **no** CDEW roles until
+an admin grants them; a provider's own role claims are never auto-granted.
 
 ---
 

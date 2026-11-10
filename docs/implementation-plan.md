@@ -14,8 +14,8 @@ Stand up the standalone repo matching house conventions so later phases only add
   `docker-compose.yml`. DRF defaults: JWT auth, `IsAuthenticated`, `JSONRenderer`, page size 50.
 - **Auth:** depend on `hk-identity` (`AUTH_USER_MODEL` = its `Identity`; Firebase → JWT); **local role
   table** (reviewer / prompt-author / admin) + permission gates + a role-admin UI stub (hybrid, design §11).
-  *(Superseded 2026-11-09: SSO is via promop family-auth tokens, not Firebase. See #31 and
-  design §11.)*
+  *(Superseded 2026-11-09: partner auth follows hk-labs, with Firebase as an org-owned IdP plus
+  promop-hosted family tokens, and no `hk-identity` dependency. See #31 and design §11.)*
 - **Frontend:** Vite + React 19 + TS, Tailwind v4, shadcn/ui, react-query v5, axios instance with
   JWT interceptor + 401-refresh retry, `KEYS` query-key factory, Vite proxy to `/api`.
 - **Storage:** `STORAGES` precedence GCS → S3 → local, private ACLs, signed URLs.
@@ -326,7 +326,7 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 | # | Workstream | CDEW issue | Depends on | Status |
 |---|---|---|---|---|
 | **D1** | **Patient identity design.** Three routes per alignment §2.7: PHR uploads take `person_id` from the patient's family token; staff link existing patients via a promop picker using their own sign-in; new patients via `provision`. The source hospital comes with the document. Decides the model, the migration of `patient_ref`, and the picker UX. | #112 | #31 (family-token sign-in), promop#2405 | **Decide now**; blocks PL, P2b, P5 |
-| **Auth** | **CDEW sign-in with promop accounts:** a family-token provider in `PartnerAuthentication`; local roles; drop Firebase | #31 | promop#2405 (audience) | **Ready**, independent of the extraction work |
+| **Auth** | **Partner auth like hk-labs:** Firebase (org-owned IdP) + promop-hosted family tokens via `PartnerAuthentication`; `partner-token/` exchange; `Identity.sub` uniqueness fix; local roles | #31 | promop#2405 (optional audience check) | **Ready**, independent of the extraction work |
 | **P0** | `ObjectType` catalog + `sync_object_types` (OpenAPI → source schemas; `promop_endpoint`, not `fhir_resource`) | #94 | — | **Ready** |
 | **P1** | `PromptDefinition.object_types`, `PromptVersion` snapshots; migrate `lab_report` / `genetics_report` (+ test samples) | #95 | P0 | **Ready** |
 | **P2** | Prompt composer + tagged-union output; `ExtractionRecord.object_type`; the seams below | #96 | P1 | **Ready** |

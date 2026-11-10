@@ -244,17 +244,22 @@ promop is the **identity host** for the HealthKey family. It serves the family a
 - **Siblings** (labs, soc, exact) verify them against promop's JWKS. A multi-issuer registry is
   planned.
 - **Each PHR installation is one promop organization.**
-- **No Firebase anywhere in the family.**
+- **Firebase** is supported as an **org-owned identity provider**. "No Firebase anywhere in the
+  family" means HealthKey runs none of its own.
 
 **Two uses in CDEW, separate from the service token in §2.6:**
 
-1. **CDEW users sign in with promop accounts** (#31).
-   - **Mechanism:** a `PartnerAuthentication` provider verifies the family token and maps it to
-     `Identity(issuer, sub)`. CDEW's vendored `Identity` already has that shape.
-   - **Roles** (reviewer, prompt author, admin) stay local, and promop's role claims are never
+1. **CDEW users sign in with a promop-hosted or an org's Firebase account** (#31, ported from
+   hk-labs).
+   - **Mechanism:** `PartnerAuthentication` routes each token by its `iss`.
+     - `PhrTokenProvider` takes promop family tokens, with `PHR_ISSUER`/`PHR_JWKS_URL` set to
+       promop's family auth.
+     - `FirebaseTokenProvider` takes Firebase ID tokens.
+     - Both map to `Identity(issuer, sub)`. The frontend exchanges the token for a CDEW JWT pair
+       at `partner-token/`.
+   - **Roles** (reviewer, prompt author, admin) stay local, and providers' role claims are never
      auto-granted.
-   - **Config** is an `{issuer: jwks_url}` map, so promop's registry drops in later.
-   - Replaces the Firebase provider design §11 used to plan.
+   - **Fix CDEW's `Identity.sub`** global unique (hk-labs #59), so two issuers can share a `sub`.
 
 2. **How a document's patient is identified (D1, #112).** There are three routes:
 
