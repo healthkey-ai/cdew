@@ -3,7 +3,7 @@
 Tokenizes the document text into words on a synthetic grid so snippet→bbox
 mapping (#68) is testable without calling Document AI, and returns a 1×1 page
 image so the page-image endpoint (#69) is testable too. Wired via
-``settings.DOCAI_OCR_FN`` in the test settings.
+``settings.GEOMETRY_OCR_FN`` in the test settings (replaces the engine chain).
 """
 import base64
 

@@ -3,8 +3,11 @@
 `ocr(content, mime_type)` returns normalized geometry: per-page dimensions +
 rendered page image, and per-token text + **normalized** bounding box (0..1).
 The heavy `google.cloud.documentai` import is lazy so this module (and the
-hermetic path) load without the SDK; tests swap the whole callable via
-``settings.DOCAI_OCR_FN`` so CI never calls Document AI.
+hermetic path) load without the SDK. It is the last engine in the chain
+(``engines.py``) and runs only when DOCAI_ENABLED; tests swap the whole chain
+via ``settings.GEOMETRY_OCR_FN`` so CI never calls Document AI.
+
+Every engine returns this shape:
 
 Return shape::
 
@@ -15,13 +18,6 @@ Return shape::
     }
 """
 from django.conf import settings
-from django.utils.module_loading import import_string
-
-
-def _ocr_fn():
-    """Resolve the OCR boundary — a test double via settings, else the real client."""
-    path = getattr(settings, "DOCAI_OCR_FN", "")
-    return import_string(path) if path else ocr
 
 
 def _token_text(full_text: str, layout) -> str:

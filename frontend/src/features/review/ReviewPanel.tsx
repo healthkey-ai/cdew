@@ -27,6 +27,7 @@ import {
   useGeometry,
   useTriggerGeometry,
 } from "@/features/documents/api";
+import { OriginalDocument } from "@/features/documents/OriginalDocument";
 import { FIELD_LABELS, type ObjectType, useObjectTypes } from "@/features/prompts/api";
 import { isJobActive, useJobs } from "@/features/workflow/api";
 import { api } from "@/lib/api";
@@ -169,12 +170,14 @@ function PageOverlay({
 /** The document-image view: pages with fact bbox overlays, or loading/failed state. */
 function DocumentImageView({
   docId,
+  mime,
   geometry,
   facts,
   active,
   onPick,
 }: {
   docId: number;
+  mime: string;
   geometry: Geometry | undefined;
   facts: ExtractionRecord[];
   active: ExtractionRecord | null;
@@ -188,10 +191,15 @@ function DocumentImageView({
       </div>
     );
   }
-  if (geometry.status === "failed") {
+  if (geometry.status !== "ready") {
+    // No geometry (no engine for this file, or it failed): show the document as
+    // it is, just without the highlight overlay. The Text view still highlights.
     return (
-      <div className="rounded-md border p-3 text-xs text-destructive">
-        Couldn't extract geometry ({geometry.errors?.[0]?.code ?? "error"}). Use the Text view.
+      <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+        <p className="text-[11px] text-muted-foreground">
+          Highlights aren’t available for this document — use the Text view to see where a fact came from.
+        </p>
+        <OriginalDocument docId={docId} mime={mime} className="min-h-[60vh] flex-1" />
       </div>
     );
   }
@@ -391,7 +399,8 @@ export function ReviewPanel({ docId }: { docId: number }) {
       docView === "image" &&
       triggerGeom.isIdle &&
       geometry.data?.status !== "ready" &&
-      geometry.data?.status !== "pending"
+      geometry.data?.status !== "pending" &&
+      geometry.data?.status !== "unavailable" // no engine applies — asking again won't change that
     ) {
       triggerGeom.mutate();
     }
@@ -561,7 +570,7 @@ export function ReviewPanel({ docId }: { docId: number }) {
                   objectType={f.object_type ? byKey[f.object_type] : undefined}
                   active={active?.id === f.id}
                   saving={actions.editFact.isPending}
-                  showNotLocated={docView === "image" && !f.provenance.bbox}
+                  showNotLocated={docView === "image" && geometry.data?.status === "ready" && !f.provenance.bbox}
                   onSelect={() => setActive(f)}
                   onSave={(payload) =>
                     actions.editFact.mutate({ id: f.id, payload }, { onSuccess: () => toast.success("Fact updated") })
@@ -617,6 +626,7 @@ export function ReviewPanel({ docId }: { docId: number }) {
             {docView === "image" ? (
               <DocumentImageView
                 docId={docId}
+                mime={doc.data?.mime ?? ""}
                 geometry={geometry.data}
                 facts={facts.data ?? []}
                 active={active}

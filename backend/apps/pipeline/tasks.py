@@ -103,25 +103,24 @@ class DryRunPrefectRunner:
         return [f.result() for f in futures]
 
 
-@task(name="docai-geometry", tags={"docai"}, retries=_RETRIES, retry_delay_seconds=_RETRY_DELAY)
-def docai_geometry_task(doc_id: int) -> dict:
+@task(name="geometry", tags={"geometry"}, retries=_RETRIES, retry_delay_seconds=_RETRY_DELAY)
+def geometry_task(doc_id: int) -> dict:
+    """The geometry engine chain (PDF text layer → Tesseract → Document AI) for one
+    document; ``{engine: None}`` when no engine applies (not retried)."""
     from apps.documents.models import SourceDocument
 
-    from apps.documents.geometry.docai import _ocr_fn
+    from apps.documents.geometry.service import compute_for
 
     try:
-        doc = SourceDocument.objects.get(id=doc_id)
-        with doc.file.open("rb") as f:
-            content = f.read()
-        return _ocr_fn()(content, doc.mime)
+        return compute_for(SourceDocument.objects.get(id=doc_id))
     except Exception as exc:
-        logger.warning("task: docai geometry failed doc=%s err=%s", doc_id, type(exc).__name__)
+        logger.warning("task: geometry failed doc=%s err=%s", doc_id, type(exc).__name__)
         raise RuntimeError("geometry_failed") from None
 
 
 class GeometryPrefectRunner:
-    """Geometry runner (#67): the Document AI call as a retried, `docai`-tagged
+    """Geometry runner (#67): the engine chain as a retried, `geometry`-tagged
     task. Injected by geometry_flow; never used on the ``local`` path."""
 
     def ocr(self, doc) -> dict:
-        return docai_geometry_task(doc.id)
+        return geometry_task(doc.id)

@@ -1,5 +1,5 @@
 """Geometry orchestration — the single source of truth for DocumentGeometry state
-(design §9, #67). `GeometryDirectRunner` runs the Doc AI call inline (tests +
+(design §9, #67). `GeometryDirectRunner` runs the engine chain inline (tests +
 `local` dispatch, no Prefect); the geometry flow injects a task runner for
 retries + concurrency. Prefect-free so the hermetic path never loads it.
 """
@@ -10,24 +10,35 @@ from django.core.files.storage import default_storage
 
 from apps.documents.models import DocumentGeometry, GeometryStatus, SourceDocument
 
-from .docai import _ocr_fn
+from .engines import NoGeometry, compute
 
 logger = logging.getLogger("apps.documents")
 
 
+def compute_for(doc: SourceDocument) -> dict:
+    """Run the engine chain on the original: ``{engine, pages, tokens}``, or
+    ``{engine: None}`` when no engine applies to this document."""
+    with doc.file.open("rb") as f:
+        content = f.read()
+    try:
+        return compute(content, doc.mime)
+    except NoGeometry:
+        return {"engine": None}
+
+
 class GeometryDirectRunner:
-    """Default: read the original + call the Doc AI boundary inline (no Prefect)."""
+    """Default: run the engine chain inline (no Prefect)."""
 
     def ocr(self, doc: SourceDocument) -> dict:
-        with doc.file.open("rb") as f:
-            content = f.read()
-        return _ocr_fn()(content, doc.mime)
+        return compute_for(doc)
 
 
 def execute_geometry(doc_id: int, *, runner=None) -> DocumentGeometry:
-    """Compute + cache Document AI geometry for one document. Stores page images in
-    the private object store and tokens on the DocumentGeometry row. Idempotent —
-    re-running replaces the cache."""
+    """Compute + cache geometry for one document with the first engine that
+    applies (engines.py). Stores page images in the private object store and
+    tokens on the DocumentGeometry row. No engine → ``unavailable`` (the review
+    shows the document without the overlay). Idempotent — re-running replaces
+    the cache."""
     runner = runner or GeometryDirectRunner()
     doc = SourceDocument.objects.get(id=doc_id)
     geom, _ = DocumentGeometry.objects.get_or_create(document=doc)
@@ -36,12 +47,20 @@ def execute_geometry(doc_id: int, *, runner=None) -> DocumentGeometry:
 
     try:
         result = runner.ocr(doc)
+        if not result.get("engine"):
+            geom.status, geom.engine, geom.pages, geom.tokens = GeometryStatus.UNAVAILABLE, "", [], []
+            geom.errors = [{"code": "no_geometry_engine"}]
+            geom.save(update_fields=["status", "engine", "pages", "tokens", "errors", "updated_at"])
+            logger.info("geometry: unavailable doc=%s", doc_id)
+            return geom
         pages = [_store_page(doc.id, p) for p in result["pages"]]
         geom.pages = pages
         geom.tokens = result["tokens"]
+        geom.engine = result["engine"]
         geom.status = GeometryStatus.READY
         geom.errors = []
-        geom.save(update_fields=["pages", "tokens", "status", "errors", "updated_at"])
+        geom.save(update_fields=["pages", "tokens", "engine", "status", "errors", "updated_at"])
+        logger.info("geometry: ready doc=%s engine=%s pages=%d", doc_id, geom.engine, len(pages))
         # Geometry ready → map each fact's snippet to its bbox (#68).
         from .mapping import populate_bboxes
 

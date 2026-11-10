@@ -23,7 +23,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# tesseract-ocr: the in-container OCR engine for scanned/image documents' review
+# geometry (backend/apps/documents/geometry/engines.py).
+RUN apt-get update && apt-get install -y --no-install-recommends curl tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./

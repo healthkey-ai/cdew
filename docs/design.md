@@ -408,6 +408,18 @@ Each fact is **auditable** (who/what/where), **reviewable** (click → highlight
 it (§8). `bbox` stays `null` in v1; if text-span highlighting proves insufficient (e.g. many scanned
 docs), §15 revisits adding a layout-aware OCR engine to populate it.
 
+> **As built (geometry engines, `documents/geometry/engines.py`):** the review's Document view computes
+> geometry on demand. It uses the **first engine that applies**, and each fact's snippet is then mapped
+> to `bbox`.
+> 1. **The PDF's own text layer** (pypdfium2): exact word boxes and page images, computed locally. It
+>    is skipped for a near-textless PDF (a scan).
+> 2. **Tesseract OCR**, in-container (`tesseract-ocr` in the image), for scans and images.
+> 3. **Google Document AI**, only when `DOCAI_ENABLED`.
+>
+> `GEOMETRY_ENGINES` sets the order, and `DocumentGeometry.engine` records which engine ran. When no
+> engine applies (e.g. plain text), geometry is `unavailable`. The Document view then shows the
+> original file **without the highlight overlay**, and the Text view still highlights the span.
+
 ---
 
 ## 10. LLM integration (Pydantic AI)

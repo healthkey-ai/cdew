@@ -58,7 +58,9 @@ export interface ExtractionRecord {
 }
 
 export interface Geometry {
-  status: "pending" | "ready" | "failed";
+  // unavailable: no engine applies (e.g. plain text) — the document is shown without highlights
+  status: "pending" | "ready" | "failed" | "unavailable";
+  engine: string; // pdf_text | tesseract | docai
   pages: { page: number; width: number; height: number; has_image: boolean }[];
   errors: { code: string }[];
 }
