@@ -68,6 +68,31 @@ engine — **Chandra OCR** (Datalab) or **DeepSeek-OCR** — evaluated on repres
 
 #### Finalise OCR pipeline
 
+## promop alignment
+
+### P2b — Disease relevance (second mapping layer)
+
+**Status:** deferred · **Priority:** after P0–P2 · **Tracked in:**
+[cdew#109](https://github.com/healthkey-ai/cdew/issues/109) (folds in #103).
+
+**promop side: done.** `GET /api/v1/relevance/` and `relevance/signals/` shipped in promop#1971
+(2026-10-22).
+
+**Still waiting on CDEW:**
+- the patient-identity decision and patient link (D1, PL);
+- term resolution at staging (P2a, [cdew#110](https://github.com/healthkey-ai/cdew/issues/110));
+- promop staff granting CDEW's service application `system/disease.read` + `system/*.read`.
+
+**Note:** the relevance lists fill in as promop#1611 (field-to-concept mapping) progresses.
+promop's `unmapped_fields` shows what is still missing.
+
+Read the patient's disease from promop at run time and use promop's curated per-disease relevance
+to **emphasize, never restrict** what the extraction prompt asks for; pin the relevance version on
+each run; rank the review queue by it; count concepts that resolve but are missing from it and
+report them to curators. Design: [`docs/promop-alignment.md`](./docs/promop-alignment.md) §7a.
+Implementation plan and the seams P0–P2 must leave for it:
+[`docs/implementation-plan.md`](./docs/implementation-plan.md) (*promop alignment → P2b*).
+
 ## UI
 
 The admin SPA is now routed (login · inbox · taxonomies · extractors · users · review); the items

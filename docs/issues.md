@@ -149,7 +149,7 @@ with a task-list linking its child issues.
 | IS-021 | Pipeline log UI (job history + Prefect run link) | frontend | P2 | UX polish | — |
 | IS-022 | Validation UI: full review / classification / low-confidence queues | frontend | P1 | UX polish | — |
 | IS-023 | Integrate `hk-identity` package (replace vendored Identity) | auth/backend | P1 | Platform | — |
-| IS-024 | Firebase `PartnerAuthentication` provider (SSO) | auth/backend | P1 | Platform | IS-023 |
+| IS-024 | Partner auth like hk-labs: Firebase (org-owned IdP) + promop-hosted family tokens | auth/backend | P1 | Platform | — |
 | IS-025 | Additional extractors: imaging, diagnoses, medications, procedures | llm/backend | P2 | Extraction+ | — |
 | IS-026 | LOINC three-tier matcher for labs (port hk-labs) | backend | P2 | M5 — Commit | — |
 | IS-027 | SNOMED / RxNorm / UCUM coding via OMOP vocab (pin Athena) | backend | P2 | M5 — Commit | IS-026 |
@@ -410,11 +410,23 @@ In-code `TODO(auth)` in `apps/accounts/models.py`; design §11.
   (`AUTH_USER_MODEL`) for its model; **keep `RoleAssignment` local**; migration/data path.
 - **Acceptance:** identity comes from the package; local role grants + gates unchanged; tests green.
 
-### IS-024 — Firebase `PartnerAuthentication` provider (SSO)
-`area:auth` `area:backend` `type:feature` `P1` · after IS-023
-- **Scope:** implement a Firebase provider behind `PARTNER_AUTH_PROVIDERS` (Firebase ID-token → house
-  JWT, `firebase-admin` already a dep); real CDM users sign in via SSO (local login stays for dev).
-- **Acceptance:** a Firebase token authenticates and resolves to an Identity + local roles.
+### IS-024 — Partner auth like hk-labs: Firebase + promop-hosted family tokens
+`area:auth` `area:backend` `type:feature` `P1` · *rescoped 2026-11-09 (#31)*
+- **Scope:** port hk-labs' partner auth (`backend/apps/accounts/`).
+  - A `TokenProvider` base with `can_handle` routing by unverified `iss`.
+  - `FirebaseTokenProvider` (`firebase-admin`, optional revocation check).
+  - `PhrTokenProvider`: RS256 via cached JWKS plus introspection. promop-hosted users come in
+    through it with `PHR_ISSUER`/`PHR_JWKS_URL` set to promop's family auth.
+  - A verified-token cache, a 401 challenge, and auto-provisioning.
+  - A `POST /api/v1/auth/partner-token/` exchange.
+  - Fix `Identity.sub`'s global unique (hk-labs #59).
+  - CDEW differences: providers off by default, lazy Firebase init, PHI-safe logs, an optional
+    audience check.
+  - Roles stay local; local login stays for dev.
+- **Acceptance:** Firebase and promop tokens each authenticate and exchange for a CDEW pair, with
+  only locally granted roles. Bad issuer, bad signature and expired tokens get 401. Same-`sub`
+  identities from two issuers coexist.
+- *Was: a Firebase-only provider after IS-023. No longer depends on IS-023.*
 
 ---
 

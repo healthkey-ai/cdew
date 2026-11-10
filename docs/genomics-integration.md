@@ -1,10 +1,19 @@
 # NGS / PRomop Genomics integration contract
 
-Status: proposed design, 2026-09-11; no runtime changes in this PR. Supplements
-[alignment §10.3](promop-alignment.md#103-ngs-report--structured-finding-with-linked-attributes).
-PRomop implementation tracking: [#1179](https://github.com/healthkey-ai/promop/issues/1179),
-[#1180](https://github.com/healthkey-ai/promop/issues/1180),
-[#1181](https://github.com/healthkey-ai/promop/issues/1181).
+Status: proposed design, 2026-09-11 (cdew#101); no runtime changes. Supplements
+[alignment §3.4 and §10.3](promop-alignment.md#103-ngs-report--structured-finding-with-linked-attributes).
+
+**Re-checked 2026-11-09 against PRomop `dev` @ `30d561cf`:**
+- **Genomics implementation delivered.** [#1179](https://github.com/healthkey-ai/promop/issues/1179),
+  [#1180](https://github.com/healthkey-ai/promop/issues/1180) and
+  [#1181](https://github.com/healthkey-ai/promop/issues/1181) are closed.
+- **Every attribute key below is accepted** by PRomop's genomics catalog.
+- **The receiving gates below are still unmet.** They are tracked in
+  [#1245](https://github.com/healthkey-ai/promop/issues/1245), which is open:
+  - a plain POST takes no provenance;
+  - it records the EHR type concept;
+  - it defaults a missing test date to today.
+- **FHIR sync** still cuts `valueString` at 60 characters.
 
 ## Why change the original example?
 
@@ -20,8 +29,9 @@ CDEW does not invent OMOP concept IDs, source keys or event links.
 
 ## Variant attributes
 
-These are keys in the PRomop Genomics implementation under review, **not a promise
-about the deployed API**. Pin a validated receiving-contract version.
+These are keys in the PRomop Genomics implementation (all accepted as of 2026-11-09),
+**not a promise about a future versioned import API**. Pin a validated receiving-contract
+version.
 
 | Group | Source keys | Meaning / review guidance |
 |---|---|---|
@@ -126,8 +136,12 @@ neither is a source-finding import contract.
 
 A future FHIR adapter can accept DiagnosticReport/GenomicsReport references,
 variant Observation components, specimen links and `hasMember`/`derivedFrom`.
-Valid FHIR does not establish that PRomop ingests those relationships. Keep the
-base-object FHIR adapter; do not extend it to Genomics without contract tests.
+Valid FHIR does not establish that PRomop ingests those relationships. Do not use FHIR
+for Genomics without contract tests.
+
+*Update 2026-11-09:* CDEW no longer commits **base objects** through FHIR either. They go
+through `code-mappings/lookup` and per-type bulk upsert (alignment §8), because FHIR sync
+labels writes `EHR_SYNC`, appends measurements, and mints placeholder concepts.
 
 ## Acceptance tests
 
