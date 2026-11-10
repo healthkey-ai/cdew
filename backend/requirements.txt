@@ -16,7 +16,12 @@ google-cloud-documentai>=2.24,<4      # geometry OCR (token bboxes + page images
 prefect>=3.0,<4.0                     # per-document flow; self-hosted on GCP (staging), local pool (dev)
 
 # ── LLM (Phase 3) ── gemini via Pydantic AI; model-agnostic, typed structured output
-pydantic-ai-slim[google]>=0.0.14
+# Pinned exactly: pydantic-ai's request building (tool_choice vs thinking, model
+# profiles) changes between releases, so dev, CI and the deploy image must run the
+# same one. 2.32.2 is the newest that supports the 0.x Anthropic SDK; anthropic 1.x+
+# moved to httpx2. Upgrade the pair together, and re-run apps/prompts/anthropic_tests.py.
+pydantic-ai-slim[google,anthropic]==2.32.2   # Gemini (Vertex/GLA) or Claude (Anthropic API)
+anthropic==0.125.0
 
 # ── Auth ── partner sign-in via promop, phr or Firebase (design §11, #31)
 firebase-admin>=6.5,<7.0             # Firebase ID-token verification (org-owned Firebase)

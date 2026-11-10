@@ -36,7 +36,12 @@ COPY --from=frontend-build /app/frontend/dist ./frontend_dist
 RUN python manage.py collectstatic --noinput
 
 RUN adduser --disabled-password --no-create-home appuser
-USER appuser
+
+# Starts as root only to hand MEDIA_ROOT (the Render persistent disk) to appuser,
+# then drops privileges with setpriv — gunicorn and every command run as appuser.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 EXPOSE 8080
 

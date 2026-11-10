@@ -2,14 +2,16 @@
 # its Blueprint, its own Postgres and its own secrets; it reaches promop only over
 # promop's API (design §11, promop-alignment.md §2.6–§2.7).
 #
-# PHI GATE: until a BAA-covered (HIPAA-enabled) Render workspace and the Google
-# BAA for Vertex/DocAI (#102) are in place, this environment takes SYNTHETIC
-# documents only — never real patient data.
+# No GCP: the LLM is Claude via the Anthropic API (the hk-labs setup on Render),
+# uploaded originals live on a Render persistent disk, and DocAI geometry OCR is off.
 #
-# One-time setup in the Render dashboard (not expressible here):
-#   - Secret file `gcp-service-account.json` on the `cdew` service — the GCP
-#     service account for Vertex, DocAI and GCS (mounted at /etc/secrets/…).
-#   - The `sync: false` values below, prompted on first Blueprint sync.
+# PHI GATE: until BAA-covered Render (HIPAA-enabled workspace) and Anthropic
+# setups are in place, this environment takes SYNTHETIC documents only — never
+# real patient data.
+#
+# The live staging resources were created through the Render API to match this
+# file (README → Deploy); it is the reference configuration and validates with
+# `render blueprints validate render.yaml`.
 
 databases:
   - name: cdew-db
@@ -34,6 +36,11 @@ services:
     autoDeployTrigger: checksPass    # deploy only after the commit's CI checks pass
     healthCheckPath: /api/v1/health/
     preDeployCommand: python manage.py migrate --noinput
+    # Uploaded originals (PHI). A disk means one instance and no zero-downtime deploys.
+    disk:
+      name: cdew-media
+      mountPath: /var/data
+      sizeGB: 10
     envVars:
       # ── Django ──────────────────────────────────────────────────────────
       - key: DJANGO_SETTINGS_MODULE
@@ -59,23 +66,24 @@ services:
       - key: PIPELINE_AUTO_CLASSIFY
         value: "False"
 
-      # ── LLM, OCR, storage (Google; service account via the secret file) ──
-      - key: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/secrets/gcp-service-account.json
-      - key: GEMINI_BACKEND
-        value: vertex
-      - key: GOOGLE_CLOUD_PROJECT
-        sync: false
-      - key: VERTEX_LOCATION
-        value: us-central1
+      # ── LLM: Claude via the Anthropic API (no GCP) ──────────────────────
+      - key: LLM_PROVIDER
+        value: anthropic
       - key: LLM_MODEL
-        value: gemini-2.5-flash
-      - key: GS_BUCKET_NAME          # private bucket for uploaded originals (PHI)
+        # claude-opus-5 / claude-sonnet-5 are safe with the pinned pydantic-ai 2.32.2.
+        # Don't switch to claude-opus-5-5 or claude-fable-5-1 without upgrading it:
+        # they reject the forced tool_choice it uses for structured output.
+        value: claude-opus-5
+      - key: ANTHROPIC_API_KEY
         sync: false
+      - key: LLM_MAX_TOKENS
+        value: "16000"
+
+      # ── Storage + OCR ───────────────────────────────────────────────────
+      - key: MEDIA_ROOT              # on the persistent disk above
+        value: /var/data/media
       - key: DOCAI_ENABLED
-        value: "False"               # enable with DOCAI_PROCESSOR_ID once configured
-      - key: DOCAI_PROCESSOR_ID
-        sync: false
+        value: "False"               # Google Document AI; off without GCP
 
       # ── Staff sign-in (#31 Part A) ──────────────────────────────────────
       - key: PARTNER_AUTH_PROVIDERS
