@@ -16,6 +16,17 @@ import {
 
 const pct = (x: number | null) => (x == null ? "—" : `${Math.round(x * 100)}%`);
 
+/** Extractor tooltips — what each number means. */
+const TIP = {
+  exact:
+    "Exact match, i.e. accuracy at document level: samples whose facts match the expected exactly ÷ samples that have expected facts. This is the pass rate.",
+  prf: "Precision / Recall / F1, micro-averaged over every fact in the set. A fact counts as correct only when it is identical to an expected fact. Precision means no invented facts; recall means no missed facts.",
+  fields:
+    "Field accuracy: for extracted facts paired with an expected fact (identical, or nearly so), the share of fields that match. This shows “right fact, wrong unit/date” separately from missed facts.",
+  grounded: "Grounded: the share of extracted facts whose source snippet was found in the document.",
+  breakdown: "Breakdowns: precision/recall/F1 per object type, and accuracy per field (worst first).",
+};
+
 /** One headline number, with what it means on hover. */
 function Stat({ label, value, detail, tip }: { label: string; value: number | null; detail: string; tip: string }) {
   return (
@@ -101,7 +112,7 @@ export function TestSetMetrics(
           detail={`${m.exact.right} / ${m.exact.total} docs`}
           tip={
             props.kind === "extractor"
-              ? "Documents whose extracted facts equal Expected exactly — every fact found, nothing extra. The strictest score (the pass rate)."
+              ? TIP.exact
               : "Documents routed to exactly the expected set of types (subset accuracy). The pass rate."
           }
         />
@@ -119,7 +130,7 @@ export function TestSetMetrics(
           detail={`${c.tp} / ${c.tp + c.fp} ${unit}`}
           tip={
             props.kind === "extractor"
-              ? "Of the facts extracted, the share that are right (identical to an expected fact). Low precision = invented, duplicated or wrong-valued facts."
+              ? TIP.prf
               : "Of the types routed to, the share that were expected. Low precision = documents sent to extractors they don't need."
           }
         />
@@ -129,7 +140,7 @@ export function TestSetMetrics(
           detail={`${c.tp} / ${c.tp + c.fn} ${unit}`}
           tip={
             props.kind === "extractor"
-              ? "Of the expected facts, the share extracted exactly. Low recall = facts missed or extracted with a wrong field."
+              ? TIP.prf
               : "Of the expected types, the share the classifier routed to. Low recall = documents that skip an extractor they need."
           }
         />
@@ -137,7 +148,11 @@ export function TestSetMetrics(
           label="F1"
           value={f1(c)}
           detail={`${c.fp} wrong · ${c.fn} missed`}
-          tip="The harmonic mean of precision and recall — one number to compare versions by."
+          tip={
+            props.kind === "extractor"
+              ? TIP.prf
+              : "The harmonic mean of precision and recall — one number to compare versions by."
+          }
         />
         {props.kind === "extractor" && (
           <>
@@ -145,23 +160,32 @@ export function TestSetMetrics(
               label="Field accuracy"
               value={rate(props.metrics.fields)}
               detail={`${props.metrics.fields.right} / ${props.metrics.fields.total} fields`}
-              tip="Of facts paired with an expected fact (identical or nearly), the share of field values that are right. Separates “right fact, wrong unit/date” from facts that are missing altogether."
+              tip={TIP.fields}
             />
             <Stat
               label="Grounded"
               value={rate(props.metrics.grounded)}
               detail={`${props.metrics.grounded.right} / ${props.metrics.grounded.total} facts`}
-              tip="Extracted facts whose source snippet was located in the document (provenance resolved). Doesn't need Expected; counts every extracted document."
+              tip={TIP.grounded}
             />
           </>
         )}
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1 hover:text-foreground">
-          <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-          {props.kind === "extractor" ? "By object type and field" : "By type"}
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1 hover:text-foreground">
+                <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+                {props.kind === "extractor" ? "By object type and field" : "By type"}
+              </button>
+            }
+          />
+          <TooltipContent className="max-w-72">
+            {props.kind === "extractor" ? TIP.breakdown : "Precision/recall/F1 per taxonomy type."}
+          </TooltipContent>
+        </Tooltip>
         <span>
           Over {m.scored} document{m.scored === 1 ? "" : "s"} with a result and Expected; micro-averaged.
         </span>

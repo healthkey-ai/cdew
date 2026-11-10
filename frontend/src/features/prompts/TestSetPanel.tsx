@@ -556,19 +556,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
 
               const expectedEditor = (
                 <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium">Expected — JSON</span>
-                    {!isClassifier && (
-                      <TipButton
-                        tip="Copy the extracted facts into Expected as the baseline to compare against"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setExpectedFromExtracted(s)}
-                      >
-                        Set from extraction
-                      </TipButton>
-                    )}
-                  </div>
+                  <div className="mb-1 text-xs font-medium">Expected — JSON</div>
                   <Textarea
                     className="h-64 font-mono text-xs"
                     value={expectedText}
@@ -789,10 +777,21 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
 
                             <TabsContent value="expected" className="mt-3">
                               <Tabs defaultValue="table">
-                                <TabsList variant="line">
-                                  <TabsTrigger value="table">Table</TabsTrigger>
-                                  <TabsTrigger value="json">JSON</TabsTrigger>
-                                </TabsList>
+                                {/* One "Set from extraction" for both views (it rewrites Expected). */}
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <TabsList variant="line">
+                                    <TabsTrigger value="table">Table</TabsTrigger>
+                                    <TabsTrigger value="json">JSON</TabsTrigger>
+                                  </TabsList>
+                                  <TipButton
+                                    tip="Copy the extracted facts into Expected as the baseline to compare against"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setExpectedFromExtracted(s)}
+                                  >
+                                    Set from extraction
+                                  </TipButton>
+                                </div>
 
                                 <TabsContent value="table" className="mt-2 space-y-2">
                                   {expectedRows === null ? (
@@ -877,14 +876,6 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                     >
                                       <Plus />
                                       Row
-                                    </TipButton>
-                                    <TipButton
-                                      tip="Copy the extracted facts into Expected as the baseline to compare against"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => setExpectedFromExtracted(s)}
-                                    >
-                                      Set from extraction
                                     </TipButton>
                                     <TipButton
                                       tip="Remove byte-identical duplicate facts from Expected"
