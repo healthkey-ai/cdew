@@ -3,7 +3,7 @@ import { Loader2, Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { type DirectoryPatient, directoryErrorDetail, usePatientSearch } from "./api";
+import { type DirectoryPatient, directoryErrorDetail, usePatientDirectory, usePatientSearch } from "./api";
 
 function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value);
@@ -37,6 +37,7 @@ export function PatientPicker({
   const [active, setActive] = useState(0);
   const debounced = useDebounced(query);
   const search = usePatientSearch(debounced, !value);
+  const host = usePatientDirectory(true).data?.host ?? "HealthKey"; // cached; the picker is admin-only
   const results = search.data ?? [];
   const typing = query.trim() !== debounced.trim();
 
@@ -120,7 +121,13 @@ export function PatientPicker({
             </div>
           )}
           {!typing && search.isSuccess && results.length === 0 && (
-            <div className="px-2 py-1.5 text-muted-foreground">No matching patients.</div>
+            <div className="space-y-1 px-2 py-1.5 text-muted-foreground">
+              <div>No matching patients.</div>
+              <div className="text-xs">
+                Only patients your {host} account can access are shown. Being in the same organization isn’t
+                enough — an org admin role there (or a group grant) is. Ask an org admin if someone is missing.
+              </div>
+            </div>
           )}
           {results.map((p, i) => (
             <button
