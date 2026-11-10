@@ -86,21 +86,61 @@ def snippet_to_bbox(snippet: str, tokens: list[dict]) -> dict | None:
 
 
 def _rows(tokens: list[dict]) -> list[tuple[int, list[dict]]]:
-    """Group tokens into visual rows (per page, by y-center), each sorted by x."""
+    """Group tokens into visual rows (per page, by y-center), each sorted by x.
+
+    A token joins the row when its y-center is close to the row's *first* token —
+    within half that token's height (capped at _ROW_TOL). Comparing to the previous
+    token instead lets OCR's height jitter chain a dense paragraph's lines into one
+    "row"."""
     rows: list[tuple[int, list[dict]]] = []
     for page in sorted({t["page"] for t in tokens}):
         toks = sorted((t for t in tokens if t["page"] == page), key=_yc)
         cur: list[dict] = []
-        last: float | None = None
+        anchor, tol = 0.0, _ROW_TOL
         for t in toks:
-            if last is not None and _yc(t) - last > _ROW_TOL:
+            if cur and _yc(t) - anchor > tol:
                 rows.append((page, sorted(cur, key=lambda x: x["bbox"][0])))
                 cur = []
+            if not cur:
+                height = t["bbox"][3] - t["bbox"][1]
+                anchor, tol = _yc(t), min(_ROW_TOL, height / 2) if height > 0 else _ROW_TOL
             cur.append(t)
-            last = _yc(t)
         if cur:
             rows.append((page, sorted(cur, key=lambda x: x["bbox"][0])))
     return rows
+
+
+def _number(text: str) -> float | None:
+    """A token's numeric value, ignoring operators and thousands separators ("<0.5" → 0.5)."""
+    try:
+        return float(re.sub(r"[^\d.\-]", "", text.replace(",", "")) or "x")
+    except ValueError:
+        return None
+
+
+def _fact_values(payload: dict) -> tuple[set[float], set[str]]:
+    """The fact's own value, as numbers and as normalized words, to recognise its row."""
+    numbers, words = set(), set()
+    for key in ("value_as_number", "value"):
+        v = payload.get(key)
+        if isinstance(v, int | float) and not isinstance(v, bool):
+            numbers.add(float(v))
+    for key in ("value_source_value", "value_as_string", "value"):
+        v = payload.get(key)
+        if isinstance(v, str) and v.strip():
+            words.update(_words(v))
+            n = _number(v)
+            if n is not None:
+                numbers.add(n)
+    return numbers, words
+
+
+def _has_fact_value(tokens: list[dict], numbers: set[float], words: set[str]) -> bool:
+    for t in tokens:
+        txt = _norm(t["text"])
+        if txt in words or (numbers and any(ch.isdigit() for ch in txt) and _number(txt) in numbers):
+            return True
+    return False
 
 
 def _name_words(payload: dict) -> list[str]:
@@ -147,6 +187,7 @@ def record_to_bbox(rec, tokens: list[dict]) -> dict | None:
     name_words = _name_words(payload)
     snippet = (rec.provenance or {}).get("snippet", "")
     if name_words:
+        numbers, value_words = _fact_values(payload)
         best = None  # (score, page, segment)
         for page, row in _rows(tokens):
             if not _row_has_name(row, name_words):
@@ -154,13 +195,17 @@ def record_to_bbox(rec, tokens: list[dict]) -> dict | None:
             seg = _data_segment(row, name_words)
             if not seg:
                 continue
-            # A data row opens with the name (left edge) and carries a value; a
-            # prose mention of the name does neither. Rank on that, then take the
-            # earliest/topmost such row (the main table beats later repeats).
+            # The row that carries the fact's own value wins — a name is also
+            # mentioned in summary prose, often leading a line. Then: a data row
+            # opens with the name (left edge) and carries some value, where a prose
+            # mention does neither; then the earliest/topmost such row (the main
+            # table beats later repeats). A mis-extracted value just falls through
+            # to those rules.
+            own_value = _has_fact_value(seg[1:], numbers, value_words)
             leading = seg[0]["bbox"][0] - min(t["bbox"][0] for t in row) <= _LEADING_TOL
             has_value = _has_number(seg[1:])
             row_yc = sum(_yc(t) for t in row) / len(row)
-            score = (leading, has_value, -page, -row_yc)
+            score = (own_value, leading, has_value, -page, -row_yc)
             if best is None or score > best[0]:
                 best = (score, page, seg)
         if best is not None:

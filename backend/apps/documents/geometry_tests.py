@@ -130,6 +130,41 @@ class BboxMappingTests(TestCase):
         assert [t["text"] for t in tokens if t["bbox"] in box["rects"]][0] == "Hemoglobin"
         assert tokens[3]["bbox"] in box["rects"]  # the value is in the highlighted row
 
+    def test_row_with_the_facts_value_beats_a_leading_prose_mention(self):
+        """Staging, Female Blood Profile: the DHEAS fact (47 µg/dL) boxed the page-4
+        summary paragraph, which starts a line with "DHEAS" and has numbers, instead
+        of the results row on page 1."""
+        from types import SimpleNamespace
+
+        from apps.documents.geometry.mapping import record_to_bbox
+
+        def line(page, y, words, x0=0.05, h=0.011):
+            return [{"page": page, "text": w, "bbox": [round(x0 + i * 0.07, 5), y, round(x0 + i * 0.07 + 0.06, 5), y + h]}
+                    for i, w in enumerate(words)]
+
+        # page 1 results table: label column at x=0.05, DHEAS row carries 47
+        table = line(1, 0.40, ["Cortisol", "12.1", "ug/dL"]) + line(1, 0.43, ["DHEAS", "47", "ug/dL", "40-290"])
+        # page 1 prose that also leads with DHEAS and carries other numbers
+        prose = line(1, 0.10, ["DHEAS", "(blood", "spot)", "is", "low-normal,", "16%", "below", "2017"])
+        rec = SimpleNamespace(payload={"measurement_source_value": "DHEAS", "value_as_number": 47,
+                                       "unit_source_value": "ug/dL", "value_source_value": "47"},
+                              provenance={"snippet": "DHEAS 47", "bbox": None})
+        box = record_to_bbox(rec, prose + table)
+        assert box["rects"][0] == table[3]["bbox"]  # the DHEAS label in the results row
+        assert table[4]["bbox"] in box["rects"]       # …and its value
+
+    def test_dense_paragraph_lines_are_separate_rows(self):
+        """OCR boxes jitter in height; lines ~0.014 apart must not chain into one row."""
+        from apps.documents.geometry.mapping import _rows
+
+        tokens = []
+        for line_no in range(4):
+            for i in range(6):
+                y = 0.30 + line_no * 0.014 + (0.003 if i % 2 else 0)  # jittered tops
+                tokens.append({"page": 1, "text": f"w{line_no}{i}", "bbox": [0.05 + i * 0.1, y, 0.13 + i * 0.1, y + 0.011]})
+        rows = _rows(tokens)
+        assert [len(r) for _, r in rows] == [6, 6, 6, 6]
+
     def test_snippet_fallback_ignores_punctuation_only_ocr_tokens(self):
         from apps.documents.geometry.mapping import snippet_to_bbox
 
