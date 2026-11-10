@@ -4,6 +4,7 @@ Base Django settings for CDEW — the Clinical Data Extraction Workflow service.
 See docs/design.md. Stack: Django/DRF/Postgres, Prefect orchestration (added in
 Phase 2), gemini via Pydantic AI (Phase 3), hybrid auth (hk-identity + local roles).
 """
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -118,6 +119,23 @@ LOGGING = {
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 WHITENOISE_ALLOW_ALL_ORIGINS = True
+
+# The built SPA (Vite `dist/`), present only in the deploy image (root Dockerfile,
+# #31 Part C). WhiteNoise serves it from the site root — `/assets/*`, `/favicon…`
+# — and config/urls.py answers every other non-API route with its index.html.
+# Same origin as the API, so the SPA needs no CORS. Absent in dev, where Vite serves it.
+FRONTEND_DIST = BASE_DIR / "frontend_dist"
+WHITENOISE_ROOT = str(FRONTEND_DIST) if FRONTEND_DIST.exists() else None
+_MANIFEST_HASHED = re.compile(r"^.+\.[0-9a-f]{12}\..+$")  # WhiteNoise's default test
+
+
+def _immutable_file(path, url):
+    """Cache forever: Vite's content-hashed `/assets/*` and Django's manifest-hashed
+    static files. Everything else (index.html, favicon) keeps a short max-age."""
+    return url.startswith("/assets/") or bool(_MANIFEST_HASHED.match(url))
+
+
+WHITENOISE_IMMUTABLE_FILE_TEST = _immutable_file
 
 # ── User-uploaded files (PHI: originals + parsed text) ──────────────────────
 # Storage precedence (design §2): GCS (GS_BUCKET_NAME) → S3 (AWS_STORAGE_BUCKET_NAME)
@@ -271,7 +289,23 @@ PARTNER_AUTH_PROVIDERS = env.list("PARTNER_AUTH_PROVIDERS", default=[])
 #   {"key", "label", "issuer", "jwks_url", "login_url"?, "audience"?}
 # `login_url` (the host's family-auth `login/`) puts a sign-in option on CDEW's
 # login page; without it the issuer is only accepted via token exchange.
-PARTNER_AUTH_ISSUERS = env.json("PARTNER_AUTH_ISSUERS", default=[])
+def _json_env(name, default):
+    """JSON from the environment. Unset or blank → ``default`` (a dashboard may
+    store an untouched secret as ""); malformed JSON fails startup loudly."""
+    import json
+
+    from django.core.exceptions import ImproperlyConfigured
+
+    raw = env.str(name, default="").strip()
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except ValueError as exc:
+        raise ImproperlyConfigured(f"{name} is not valid JSON: {exc}") from None
+
+
+PARTNER_AUTH_ISSUERS = _json_env("PARTNER_AUTH_ISSUERS", [])
 PARTNER_AUTH_CACHE_TTL = env.int("PARTNER_AUTH_CACHE_TTL", default=60)
 PARTNER_AUTH_JWKS_CACHE_TTL = env.int("PARTNER_AUTH_JWKS_CACHE_TTL", default=3600)
 PARTNER_AUTH_LOGIN_TIMEOUT = env.int("PARTNER_AUTH_LOGIN_TIMEOUT", default=10)
@@ -281,7 +315,7 @@ PARTNER_AUTH_LOGIN_TIMEOUT = env.int("PARTNER_AUTH_LOGIN_TIMEOUT", default=10)
 FIREBASE_PROJECT_ID = env("FIREBASE_PROJECT_ID", default="")
 FIREBASE_CREDENTIALS_JSON = env("FIREBASE_CREDENTIALS_JSON", default="")
 FIREBASE_SKIP_REVOCATION_CHECK = env.bool("FIREBASE_SKIP_REVOCATION_CHECK", default=False)
-FIREBASE_WEB_CONFIG = env.json("FIREBASE_WEB_CONFIG", default={})
+FIREBASE_WEB_CONFIG = _json_env("FIREBASE_WEB_CONFIG", {})
 
 # Identity.sub is unique per issuer only (composite constraint), which auth.E003
 # assumes is global; the manager resolves bare-`sub` logins among urn:local.

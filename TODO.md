@@ -7,10 +7,23 @@ Backlog of intentionally-deferred work, with the trigger that should promote eac
 
 ### Setup staging on Render (independent, like PRISM)
 
-**Status:** not started · **Priority:** next · **Tracked in:** #31 Part C · **Trigger:** v1 is built
-(Phases 0–6) and needs a shared environment for the CDM team. `dev` → **staging**, `main` →
-**production** (later); merging to `dev` should deploy staging after CI. **Nothing is provisioned
-yet.** The repo has the app, a root `docker-compose.yml` and `config/settings/production.py`.
+**Status:** config in repo, **not provisioned** · **Priority:** next · **Tracked in:** #31 Part C
+· **Trigger:** v1 is built (Phases 0–6) and needs a shared environment for the CDM team.
+`dev` → **staging**, `main` → **production** (later).
+
+**Done in the repo:**
+- `render.yaml` (web service + CDEW's own Postgres, deployed after CI, migrate pre-deploy);
+- a root `Dockerfile` (API + built SPA in one container);
+- the SPA catch-all, plus `RENDER_EXTERNAL_HOSTNAME` handling in production settings.
+
+The image was verified locally against a fresh Postgres. **Remaining:**
+- create the Blueprint in the Render dashboard;
+- fill the `sync: false` values;
+- add the `gcp-service-account.json` secret file;
+- bootstrap the first admin;
+- the **PHI gate** below.
+
+The steps are in README → *Deploy*.
 
 CDEW is a standalone admin app (design §11), so it deploys **on its own, like PRISM**: a
 **`render.yaml` Blueprint in this repo**, not in phr's `infra/`.

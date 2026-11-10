@@ -32,6 +32,11 @@ Full stack in Docker (repo root): `docker compose up -d --build` — frontend :5
 Prefect UI :4200, worker, Postgres on **:5544** (`cdew` + `prefect` DBs). Backend services read
 `backend/.env`; run Django commands inside via `docker compose exec api python manage.py <cmd>`.
 
+Deploy (Render staging, #31 Part C): `render.yaml` + the **root** `Dockerfile` (API + built SPA in
+one container; `backend/Dockerfile` is the compose/dev image). Pushes to `dev` deploy only after CI
+passes (`autoDeployTrigger: checksPass`). Setup steps: README → *Deploy*. Staging is synthetic data
+only until the BAAs (#102).
+
 Frontend (`cd frontend`):
 - `npm run dev` — Vite on :5173, proxies `/api` → `:8000` (the proxy resolves IPv4-first because Django's dev server binds IPv4 only).
 - `npm run build` — `tsc -b && vite build`. `npm run lint` — eslint.
