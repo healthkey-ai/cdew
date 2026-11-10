@@ -194,7 +194,18 @@ export interface DryRunJob {
   version: number;
   sample_ids: number[]; // [] = whole set
   status: DryRunStatus;
-  summary: { total?: number; scored?: number; passed?: number };
+  // Micro-averaged over the scored samples' facts / type labels; null = no denominator.
+  summary: {
+    total?: number;
+    scored?: number;
+    passed?: number;
+    tp?: number;
+    fp?: number;
+    fn?: number;
+    precision?: number | null;
+    recall?: number | null;
+    f1?: number | null;
+  };
   errors: { code: string }[];
   created_at: string;
   started_at: string | null;

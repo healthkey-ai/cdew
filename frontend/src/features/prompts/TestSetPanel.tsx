@@ -25,6 +25,17 @@ import {
   useTestSampleActions,
   useTestSamples,
 } from "./api";
+import { TestSetMetrics } from "./TestSetMetrics";
+import {
+  alignFacts,
+  classifierMetrics,
+  extractorMetrics,
+  factCounts,
+  type FactPair,
+  type FactRow,
+  factsEqual,
+  stable,
+} from "./testMetrics";
 
 const DEFAULT_COL_W = 140;
 
@@ -160,77 +171,6 @@ function factsTable(
   );
 }
 
-type FactRow = Record<string, unknown>;
-type FactPair = { ex?: FactRow; exp?: FactRow; kind: "same" | "changed" | "extra" | "missing" };
-
-/** Stable stringify (object keys sorted, null fields dropped) so equality is
- * order-of-keys independent and an unset field equals an absent one — as the
- * backend's dry-run compare does. */
-const stable = (o: unknown) =>
-  JSON.stringify(o, (_k, v) =>
-    v && typeof v === "object" && !Array.isArray(v)
-      ? Object.keys(v as object)
-          .filter((k) => (v as Record<string, unknown>)[k] != null)
-          .sort()
-          .reduce((a, k) => ({ ...a, [k]: (v as Record<string, unknown>)[k] }), {})
-      : v,
-  );
-
-/** Align two fact bags **without any domain key** (works for every extractor):
- *  1) match byte-identical facts 1:1 (multiset intersection) → `same`,
- *  2) greedily pair leftovers by field similarity → `changed` (field-level diff),
- *  3) whatever is left is `extra` (extracted-only) or `missing` (expected-only).
- * Order never matters; duplicate copies with no counterpart surface as extra/missing. */
-function alignFacts(extracted: FactRow[], expected: FactRow[], attrs: string[]): FactPair[] {
-  const pairs: FactPair[] = [];
-  const expKeys = expected.map(stable);
-  const usedExp = new Set<number>();
-  const leftoverEx: FactRow[] = [];
-
-  for (const e of extracted) {
-    const k = stable(e);
-    const j = expKeys.findIndex((ek, idx) => !usedExp.has(idx) && ek === k);
-    if (j >= 0) {
-      usedExp.add(j);
-      pairs.push({ ex: e, exp: expected[j], kind: "same" });
-    } else {
-      leftoverEx.push(e);
-    }
-  }
-
-  const leftoverExp = expected.filter((_, idx) => !usedExp.has(idx));
-  const usedR = new Set<number>();
-  const sim = (a: FactRow, b: FactRow) =>
-    attrs.reduce((n, k) => n + (JSON.stringify(a[k]) === JSON.stringify(b[k]) ? 1 : 0), 0);
-
-  for (const e of leftoverEx) {
-    let best = -1;
-    let bestScore = 0;
-    leftoverExp.forEach((g, idx) => {
-      if (usedR.has(idx)) return;
-      const sc = sim(e, g);
-      if (sc > bestScore) {
-        bestScore = sc;
-        best = idx;
-      }
-    });
-    if (best >= 0) {
-      usedR.add(best);
-      pairs.push({ ex: e, exp: leftoverExp[best], kind: "changed" });
-    } else {
-      pairs.push({ ex: e, kind: "extra" });
-    }
-  }
-  leftoverExp.forEach((g, idx) => {
-    if (!usedR.has(idx)) pairs.push({ exp: g, kind: "missing" });
-  });
-  return pairs;
-}
-
-/** Two fact bags are equal iff, ignoring order, every fact pairs 1:1 (multiset). */
-const factsEqual = (a: FactRow[], b: FactRow[]) =>
-  a.length === b.length && alignFacts(a, b, []).every((p) => p.kind === "same");
-
 const KIND_LABEL: Record<FactPair["kind"], string> = {
   same: "match",
   changed: "changed",
@@ -355,9 +295,10 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
         toast.error("Extract failed — check the worker/LLM config.");
         return;
       }
-      const { scored = 0, passed = 0, total = 0 } = job.summary;
+      const { scored = 0, passed = 0, total = 0, f1 } = job.summary;
+      const f1Text = f1 != null ? ` · F1 ${Math.round(f1 * 100)}%` : "";
       toast[scored && passed < scored ? "info" : "success"](
-        scored ? `${passed}/${scored} passed` : `Extracted ${total} document${total === 1 ? "" : "s"}`,
+        scored ? `${passed}/${scored} passed${f1Text}` : `Extracted ${total} document${total === 1 ? "" : "s"}`,
       );
     },
     (err) => {
@@ -404,6 +345,14 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       return null;
     }
   }, [expectedText]);
+
+  // Set-level scorecard, recomputed from the saved results whenever Expected changes.
+  const metrics = useMemo(() => {
+    const list = samples.data ?? [];
+    return isClassifier
+      ? ({ kind: "classifier", metrics: classifierMetrics(list, types, version?.id) } as const)
+      : ({ kind: "extractor", metrics: extractorMetrics(list, attrs, version?.id) } as const);
+  }, [samples.data, isClassifier, types, attrs, version?.id]);
 
   const extractedFacts = (s: TestSample) => (s.extracted_payload as DryRunFact[] | null) ?? null;
 
@@ -578,6 +527,8 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
           </TipButton>
         </div>
 
+        {!!samples.data?.length && <TestSetMetrics {...metrics} />}
+
         <Table>
           <TableHeader>
             <TableRow>
@@ -596,11 +547,12 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
               // Per-tab counts. Expected: fact/type count; Result (classifier): routed types.
               const expectedArr = Array.isArray(s.expected_payload) ? (s.expected_payload as unknown[]) : null;
               const routedCount = (s.extracted_payload as { routed_types?: string[] } | null)?.routed_types?.length;
-              const diffCount = showDiff
-                ? alignFacts(facts?.map(factRow) ?? [], (s.expected_payload as FactRow[]) ?? [], attrs).filter(
-                    (p) => p.kind !== "same",
-                  ).length
-                : 0;
+              const pairs =
+                !isClassifier && facts && Array.isArray(s.expected_payload)
+                  ? alignFacts(facts.map(factRow), s.expected_payload as FactRow[], attrs)
+                  : null;
+              const counts = pairs && factCounts(pairs);
+              const diffCount = showDiff && pairs ? pairs.filter((p) => p.kind !== "same").length : 0;
 
               const expectedEditor = (
                 <div>
@@ -704,6 +656,15 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                               ? `routed: ${(s.extracted_payload as { routed_types?: string[] }).routed_types?.join(", ") || "—"}`
                               : `${facts?.length ?? 0} facts`}
                           </span>
+                          {counts && (counts.fp > 0 || counts.fn > 0) && (
+                            <span
+                              className="text-xs text-muted-foreground tabular-nums"
+                              title="Expected facts found exactly; extracted facts that are wrong or not expected"
+                            >
+                              · {counts.tp}/{counts.tp + counts.fn} found
+                              {counts.fp > 0 && ` · ${counts.fp} wrong`}
+                            </span>
+                          )}
                         </div>
                       )}
                     </TableCell>

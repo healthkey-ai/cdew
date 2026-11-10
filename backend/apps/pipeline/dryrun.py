@@ -17,14 +17,24 @@ from .extract import _document_binary, _facts_fn, resolve_span
 logger = logging.getLogger("apps.pipeline")
 
 
+def _fact_key(d) -> str:
+    return json.dumps({k: v for k, v in (d or {}).items() if v is not None}, sort_keys=True, default=str)
+
+
 def _facts_equal(extracted_data: list, expected) -> bool:
     """Order-insensitive multiset equality (mirrors the frontend's `factsEqual`).
     Facts are an unordered bag, so a reordering by the LLM isn't a mismatch; a
     duplicated fact with no counterpart is. Unset (null) fields don't count."""
-    def key(d):
-        return json.dumps({k: v for k, v in (d or {}).items() if v is not None}, sort_keys=True, default=str)
+    return Counter(map(_fact_key, extracted_data)) == Counter(map(_fact_key, expected or []))
 
-    return Counter(map(key, extracted_data)) == Counter(map(key, expected or []))
+
+def _fact_counts(extracted_data: list, expected) -> dict:
+    """Fact-level confusion counts (multiset, same identity as `_facts_equal`):
+    tp = extracted facts identical to an expected one, fp = the other extracted
+    facts, fn = expected facts nothing matched."""
+    got, exp = Counter(map(_fact_key, extracted_data)), Counter(map(_fact_key, expected or []))
+    tp = sum((got & exp).values())
+    return {"tp": tp, "fp": sum(got.values()) - tp, "fn": sum(exp.values()) - tp}
 
 
 def fact_row(fact: dict) -> dict:
@@ -67,6 +77,7 @@ def _classifier_result(version, text, expected=None):
         row["missing"] = sorted(exp - got)
         row["extra"] = sorted(got - exp)
         row["passed"] = exp == got
+        row.update(tp=len(exp & got), fp=len(row["extra"]), fn=len(row["missing"]))
     return row
 
 
@@ -84,7 +95,9 @@ def dry_run_sample(version, s) -> dict:
         s.extracted_payload = facts
         if s.expected_payload is not None:
             row["expected"] = s.expected_payload
-            row["passed"] = _facts_equal([fact_row(f) for f in facts], s.expected_payload)
+            rows = [fact_row(f) for f in facts]
+            row["passed"] = _facts_equal(rows, s.expected_payload)
+            row.update(_fact_counts(rows, s.expected_payload))
     else:
         cls = _classifier_result(version, text, s.expected_payload)
         row.update(cls)
@@ -100,10 +113,28 @@ def dry_run_version(version, samples) -> list[dict]:
     return [dry_run_sample(version, s) for s in samples]
 
 
+def _ratio(num: int, den: int) -> float | None:
+    return round(num / den, 4) if den else None
+
+
 def summarize(rows) -> dict:
-    """Safe counts for the DryRunJob (no PHI): total, scored (have gold), passed."""
+    """Safe counts for the DryRunJob (no PHI): total, scored (have gold), passed,
+    plus micro-averaged precision/recall/F1 over the scored samples' facts (an
+    extractor) or type labels (the classifier). A ratio with no denominator is None."""
     scored = [r for r in rows if "passed" in r]
-    return {"total": len(rows), "scored": len(scored), "passed": sum(1 for r in scored if r["passed"])}
+    tp, fp, fn = (sum(r.get(k, 0) for r in scored) for k in ("tp", "fp", "fn"))
+    precision, recall = _ratio(tp, tp + fp), _ratio(tp, tp + fn)
+    return {
+        "total": len(rows),
+        "scored": len(scored),
+        "passed": sum(1 for r in scored if r["passed"]),
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "precision": precision,
+        "recall": recall,
+        "f1": _ratio(2 * tp, 2 * tp + fp + fn),
+    }
 
 
 class DryRunDirectRunner:
