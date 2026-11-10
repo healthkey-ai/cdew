@@ -19,6 +19,8 @@ frontend/    Vite + React 19 + TS + Tailwind v4 + shadcn + react-query
 docs/        design.md · implementation-plan.md · schema-lint.md
 docker/      init scripts for the compose Postgres
 docker-compose.yml   full local stack (see below)
+Dockerfile   deploy image: API + built SPA in one container (Render)
+render.yaml  Render Blueprint for staging (see "Deploy")
 TODO.md      deferred options (geometry OCR, autoscaling, …)
 ```
 
@@ -159,6 +161,49 @@ cd frontend
 npm install
 npm run dev        # http://localhost:5173  (proxies /api → http://localhost:8000)
 ```
+
+## Deploy — Render staging
+
+CDEW deploys **independently, like PRISM** (#31 Part C), from [`render.yaml`](./render.yaml):
+- **Web service:** one container (`cdew`) built from the root [`Dockerfile`](./Dockerfile). It
+  serves the Django API and the built SPA from the same origin.
+- **Database:** CDEW's **own** Postgres (`cdew-db`, no external access).
+
+> **PHI gate.** Until a BAA-covered (HIPAA-enabled) Render workspace and the Google BAA for
+> Vertex/DocAI (#102) are in place, staging takes **synthetic documents only**.
+
+**First-time setup** (dashboard):
+1. **New → Blueprint**, then pick this repo. Render reads `render.yaml`.
+2. **Fill the `sync: false` values** it prompts for:
+   - `GOOGLE_CLOUD_PROJECT`
+   - `GS_BUCKET_NAME`: a private GCS bucket for uploaded originals
+   - `PARTNER_AUTH_ISSUERS`: JSON; see `backend/.env.example`
+   - `FIREBASE_*`: optional
+   - `DOCAI_PROCESSOR_ID`: optional
+3. **Add the GCP credential.** On the `cdew` service, add a **Secret File** named
+   `gcp-service-account.json` holding the GCP service account (Vertex, DocAI, GCS).
+   `GOOGLE_APPLICATION_CREDENTIALS` already points at `/etc/secrets/gcp-service-account.json`.
+4. **Create a first admin** from the service **Shell**:
+   `python manage.py bootstrap_dev --email you@healthtree.org --roles admin`. Give it a strong
+   `--password`. Staff then sign in through promop, phr or Firebase, and the admin grants their roles.
+
+**Deploys.** `autoDeployTrigger: checksPass` deploys each push to `dev` only **after its GitHub CI
+checks pass**:
+- `preDeployCommand` runs `migrate` before the new version takes traffic;
+- the health check is `/api/v1/health/`.
+
+**Run the deploy image locally** (production settings; needs a reachable Postgres):
+
+```bash
+docker build -t cdew-deploy .
+docker run --rm -p 8080:8080 -e DATABASE_URL=postgres://… -e SECRET_KEY=… -e RENDER_EXTERNAL_HOSTNAME=localhost cdew-deploy
+```
+
+**Orchestration** starts as `PREFECT_DISPATCH=thread`: no Prefect server, and one gunicorn worker
+with threads. Two consequences:
+- a job running when a deploy restarts the service is interrupted and must be re-run;
+- when load needs it, add a Prefect server (private service) and a background worker running
+  `python manage.py prefect_worker`, mirroring `docker-compose.yml`.
 
 ## Status
 

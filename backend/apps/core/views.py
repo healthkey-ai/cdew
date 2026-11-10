@@ -1,9 +1,9 @@
 from django.conf import settings
 from rest_framework.permissions import AllowAny
-
-from apps.accounts.permissions import HasAnyRole
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from apps.accounts.permissions import HasAnyRole
 
 
 class HealthView(APIView):

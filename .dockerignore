@@ -1,0 +1,17 @@
+# Root build context for the deploy image (Dockerfile). Keep secrets, PHI and
+# host-built artefacts out of it.
+.git
+**/.env
+**/.env.*
+!**/.env.example
+backend/.venv
+backend/media
+backend/staticfiles
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+frontend/node_modules
+frontend/dist
+**/*.tsbuildinfo
+docs

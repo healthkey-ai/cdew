@@ -1,0 +1,88 @@
+# CDEW on Render — staging (#31 Part C). Independent, like PRISM: this repo owns
+# its Blueprint, its own Postgres and its own secrets; it reaches promop only over
+# promop's API (design §11, promop-alignment.md §2.6–§2.7).
+#
+# PHI GATE: until a BAA-covered (HIPAA-enabled) Render workspace and the Google
+# BAA for Vertex/DocAI (#102) are in place, this environment takes SYNTHETIC
+# documents only — never real patient data.
+#
+# One-time setup in the Render dashboard (not expressible here):
+#   - Secret file `gcp-service-account.json` on the `cdew` service — the GCP
+#     service account for Vertex, DocAI and GCS (mounted at /etc/secrets/…).
+#   - The `sync: false` values below, prompted on first Blueprint sync.
+
+databases:
+  - name: cdew-db
+    databaseName: cdew
+    user: cdew
+    plan: "0.1c-256mb"
+    postgresMajorVersion: "16"
+    region: oregon
+    ipAllowList: []          # no external access; only Render services connect
+
+services:
+  - type: web
+    name: cdew
+    runtime: docker
+    dockerfilePath: ./Dockerfile     # API + built SPA in one container
+    dockerContext: .
+    region: oregon                   # same region as promop / phr staging
+    # Prefect thread dispatch runs its ephemeral API inside the web process, so
+    # leave headroom; shrink once a Prefect server + worker take over.
+    plan: "1c-2g"
+    branch: dev
+    autoDeployTrigger: checksPass    # deploy only after the commit's CI checks pass
+    healthCheckPath: /api/v1/health/
+    preDeployCommand: python manage.py migrate --noinput
+    envVars:
+      # ── Django ──────────────────────────────────────────────────────────
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.production
+      - key: SECRET_KEY
+        generateValue: true          # CDEW's own; never shared with promop
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cdew-db
+          property: connectionString
+      - key: ALLOWED_HOSTS
+        value: localhost,127.0.0.1   # the *.onrender.com host is added from RENDER_EXTERNAL_HOSTNAME
+      - key: LOG_LEVEL
+        value: INFO
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: GUNICORN_THREADS
+        value: "8"
+
+      # ── Pipeline / orchestration ────────────────────────────────────────
+      - key: PREFECT_DISPATCH
+        value: thread                # no Prefect server yet (design §6)
+      - key: PIPELINE_AUTO_CLASSIFY
+        value: "False"
+
+      # ── LLM, OCR, storage (Google; service account via the secret file) ──
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/secrets/gcp-service-account.json
+      - key: GEMINI_BACKEND
+        value: vertex
+      - key: GOOGLE_CLOUD_PROJECT
+        sync: false
+      - key: VERTEX_LOCATION
+        value: us-central1
+      - key: LLM_MODEL
+        value: gemini-2.5-flash
+      - key: GS_BUCKET_NAME          # private bucket for uploaded originals (PHI)
+        sync: false
+      - key: DOCAI_ENABLED
+        value: "False"               # enable with DOCAI_PROCESSOR_ID once configured
+      - key: DOCAI_PROCESSOR_ID
+        sync: false
+
+      # ── Staff sign-in (#31 Part A) ──────────────────────────────────────
+      - key: PARTNER_AUTH_PROVIDERS
+        value: apps.accounts.providers.jwks.JwksTokenProvider,apps.accounts.providers.firebase.FirebaseTokenProvider
+      - key: PARTNER_AUTH_ISSUERS    # JSON list; see backend/.env.example
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_WEB_CONFIG     # public web config JSON; empty hides "Continue with Google"
+        sync: false
