@@ -11,6 +11,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from . import partner_session
 from .models import Identity, RoleAssignment
 from .partner_auth import authenticate_partner_token, identity_for_claims, verify_partner_token
 from .permissions import IsAdmin
@@ -103,6 +104,9 @@ class PartnerLoginView(_AuthEndpoint):
     Identity (no roles), and answers with a CDEW JWT pair. Doing this
     server-side means the host needs no CORS for CDEW and its tokens never reach
     the browser. Credentials and response bodies are never logged.
+
+    For an admin, the host's token pair is kept sealed server-side
+    (``partner_session``) so the patient picker can search the host as them.
     """
 
     def post(self, request):
@@ -137,7 +141,15 @@ class PartnerLoginView(_AuthEndpoint):
         if claims is None or claims.issuer != cfg["issuer"]:
             logger.warning("partner_login: host token not verifiable key=%s", cfg["key"])
             return Response({"detail": "Sign-in service unavailable."}, status=502)
-        return _token_response(identity_for_claims(claims))
+        identity = identity_for_claims(claims)
+        refresh = _json(resp).get("refresh")
+        if identity.is_admin and isinstance(refresh, str) and refresh:
+            try:
+                partner_session.store(identity, cfg, access, refresh)
+            except partner_session.PartnerSessionError:
+                # Sign-in still succeeds; the patient picker asks to sign in again.
+                logger.warning("partner_login: host session not kept key=%s", cfg["key"])
+        return _token_response(identity)
 
 
 class PartnerTokenView(_AuthEndpoint):
@@ -178,6 +190,17 @@ class MeView(APIView):
 
     def get(self, request):
         return Response(IdentitySerializer(request.user).data)
+
+
+class LogoutView(APIView):
+    """Sign-out: drop the admin's kept host session and revoke it at the host.
+    (CDEW's own JWTs are discarded by the client.)"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        partner_session.forget(request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdminUserViewSet(viewsets.ViewSet):

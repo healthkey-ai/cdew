@@ -29,7 +29,7 @@ class SourceDocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = SourceDocument
         fields = (
-            "id", "patient_ref", "origin", "original_filename", "mime", "sha256",
+            "id", "patient_ref", "person_id", "patient_name", "origin", "original_filename", "mime", "sha256",
             "byte_size", "status", "created_at", "has_text", "classification",
             "category", "verified", "verified_at", "job",
         )

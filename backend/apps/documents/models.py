@@ -8,6 +8,7 @@ import os
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 def _upload_path(instance, filename):
@@ -40,6 +41,15 @@ class DocumentStatus(models.TextChoices):
 
 class SourceDocument(models.Model):
     patient_ref = models.CharField(max_length=255, db_index=True)
+    # Set when an admin picks the patient from the directory (#31 Part B, #112):
+    # patient_ref becomes "<host>:<person_id>" and the link is recorded here.
+    # Blank for free-text refs. patient_name is PHI — never logged.
+    person_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+    patient_name = models.CharField(max_length=255, blank=True, default="")
+    patient_linked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    patient_linked_at = models.DateTimeField(null=True, blank=True)
     origin = models.CharField(max_length=16, choices=Origin.choices, default=Origin.MANUAL)
 
     file = models.FileField(upload_to=_upload_path)  # immutable original in object storage
@@ -76,6 +86,14 @@ class SourceDocument(models.Model):
 
     def __str__(self):
         return f"doc#{self.pk} {self.original_filename or self.mime} ({self.patient_ref})"
+
+    def link_patient(self, patient: dict, by) -> None:
+        """Point this document at a directory patient (``patients.directory``). Unsaved."""
+        self.patient_ref = patient["patient_ref"]
+        self.person_id = patient["person_id"]
+        self.patient_name = patient["name"][:255]
+        self.patient_linked_by = by
+        self.patient_linked_at = timezone.now()
 
 
 class DocumentText(models.Model):

@@ -10,6 +10,8 @@ export const KEYS = {
   documents: (patientRef?: string, status?: string) =>
     ["documents", patientRef ?? "all", status ?? "any"] as const,
   documentText: (id: number) => ["documents", id, "text"] as const,
+  patientDirectory: ["patients", "directory"] as const,
+  patientSearch: (q: string) => ["patients", "search", q] as const,
   promptDefinitions: ["prompts", "definitions"] as const,
   promptVersions: (id: number) => ["prompts", "definitions", id, "versions"] as const,
 };

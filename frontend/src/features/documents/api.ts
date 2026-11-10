@@ -6,6 +6,8 @@ import { KEYS } from "@/lib/keys";
 export interface SourceDocument {
   id: number;
   patient_ref: string;
+  person_id: number | null; // set when an admin picked a directory patient (#31 Part B)
+  patient_name: string;
   origin: string;
   original_filename: string;
   mime: string;
@@ -130,10 +132,12 @@ export function useTriggerGeometry(id: number | null) {
 export function useUploadDocument() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ file, patientRef }: { file: File; patientRef: string }) => {
+    /** Either a free-text `patientRef` or a directory `personId` (admins). */
+    mutationFn: async ({ file, patientRef, personId }: { file: File; patientRef?: string; personId?: number }) => {
       const form = new FormData();
       form.append("file", file);
-      form.append("patient_ref", patientRef);
+      if (personId != null) form.append("person_id", String(personId));
+      else form.append("patient_ref", patientRef ?? "");
       return (
         await api.post<SourceDocument>("/documents/", form, {
           headers: { "Content-Type": "multipart/form-data" },
