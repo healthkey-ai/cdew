@@ -535,6 +535,18 @@ the provenance authority (§2.5).
 Seed from promop's `doc_type` enum + CDEW-only additions. Routing unchanged in mechanism:
 `routed doc types → extractors (triggers_on_types) → their object types`.
 
+*Built (P3, 2026-11-10):*
+- **Synced types.** promop's `DocTypeEnum` is synced into `DocumentType` with the object catalog.
+- **Classifier v2** uses lower-cased promop types (`lab_results`, `fish`, `cytogenetics`, `ngs`,
+  `gep`, `mrd`, `cytometry`, `bone_marrow`, `imaging`, `full_medical_records`, `consent`,
+  `advance_directive`).
+  - Each type names its `promop_doc_type`.
+  - CDEW's `office_visit` and `immunohistochemistry` use promop's `OTHER`.
+  - `OTHER` itself is not a type: unclassified documents go to the human queue.
+- **Triggers.** `lab_report` triggers on `lab_results`. `genetics_report` triggers on `fish`,
+  `cytogenetics`, `ngs`, `mrd`, `gep` and `bone_marrow`.
+- **History.** Classifier v1 is kept; its classifications keep their slugs.
+
 ---
 
 ## 5. Sync mechanism: promop → ObjectType
@@ -855,6 +867,10 @@ promop still owns the vocabulary (its curated mappings), so #33/#34 shrink into 
 - **Domain contracts** (`lint/domain_contracts.py` REGISTRY) are replaced by the synced
   `ObjectType.source_schema` (promop's required source fields become the contract). The
   W101→E110 commit gate (#37) is driven by promop, not hand-kept code.
+  - *Built (P4, 2026-11-10):* the REGISTRY is gone. `ObjectType.promop_required` holds promop's
+    required list. A required field that neither promop's coder, the commit nor CDEW's extraction
+    fills is `W101`, and `E110` once the type's CDEW-owned `commit_enabled` is flipped
+    (`schema-lint.md` §5).
 - **Reproducibility**: each `PromptVersion` **snapshots** the object types' definitions at
   publish (pinned to a promop schema version). Old extractions stay re-derivable even as
   promop evolves; a promop schema change only affects future published versions.

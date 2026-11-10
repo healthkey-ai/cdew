@@ -49,7 +49,7 @@ class ResolveSpanTests(TestCase):
 class ExtractDocumentTests(TestCase):
     def test_lab_records_staged_with_provenance(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL\nSodium 140 mmol/L")
-        n = extract_document(_ctx(doc, ["lab_report"]))
+        n = extract_document(_ctx(doc, ["lab_results"]))
         assert n >= 2
         rec = doc.extractions.first()
         assert rec.status == ExtractionStatus.STAGED
@@ -150,14 +150,14 @@ class MultimodalExtractTests(TestCase):
 
     def test_idempotent_reextract(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL\nSodium 140 mmol/L")
-        extract_document(_ctx(doc, ["lab_report"]))
+        extract_document(_ctx(doc, ["lab_results"]))
         first = ExtractionRecord.objects.filter(document=doc).count()
-        extract_document(_ctx(doc, ["lab_report"]))
+        extract_document(_ctx(doc, ["lab_results"]))
         assert ExtractionRecord.objects.filter(document=doc).count() == first  # replaced, not duplicated
 
     def test_version_bump_replaces(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL")
-        extract_document(_ctx(doc, ["lab_report"]))
+        extract_document(_ctx(doc, ["lab_results"]))
         lab = PromptDefinition.objects.get(key="lab_report")
         current = lab.active_version
         bumped = PromptVersion.objects.create(
@@ -168,7 +168,7 @@ class MultimodalExtractTests(TestCase):
         lab.active_version = bumped
         lab.save(update_fields=["active_version"])
 
-        extract_document(_ctx(doc, ["lab_report"]))
+        extract_document(_ctx(doc, ["lab_results"]))
         version_ids = {r.extractor_version_id for r in doc.extractions.all()}
         assert version_ids == {bumped.id}  # old version's records gone
 
@@ -185,6 +185,6 @@ class MultimodalExtractTests(TestCase):
 
     def test_fanout_lab_and_genetics(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL\nFISH: del(17p) positive")
-        extract_document(_ctx(doc, ["lab_report", "genetics_report"]))
+        extract_document(_ctx(doc, ["lab_results", "fish"]))
         keys = set(doc.extractions.values_list("extractor_key", flat=True))
         assert keys == {"lab_report", "genetics_report"}

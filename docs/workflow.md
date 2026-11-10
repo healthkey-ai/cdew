@@ -86,7 +86,7 @@ publishing a version — never by editing code.
 flowchart LR
     DEF["PromptDefinition<br/>kind=classifier|extractor · key<br/>enabled · triggers_on_types[]"]
     DRAFT["PromptVersion draft<br/>prompt_text · json_schema / taxonomy<br/>model · params"]
-    LINT["Schema shape-lint<br/>domain_contracts.py"]
+    LINT["Schema shape-lint<br/>catalog types · promop commit contract"]
     DRY["Dry-run vs curated test set<br/>DryRunJob — one gemini task per sample"]
     PUB["published — IMMUTABLE<br/>set as definition.active_version"]
     ARCH["archived"]

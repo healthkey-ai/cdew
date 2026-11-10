@@ -102,11 +102,17 @@ Key invariants when touching this:
 ### Schema shape-lint — `prompts/lint/`
 
 The gate that decides whether an authored prompt version may be **published**. Advisory on
-`validate`, hard gate on `publish` (any `error` blocks). Three layers: JSON-Schema
-subset/compilability, the fixed provenance envelope, and per-`domain` contracts
-(`lint/domain_contracts.py` `REGISTRY` — required/recommended fields per domain). Domain `required`
-fields are warnings in v1 and become errors (`E110`) when a domain's commit phase goes live. Full
-code table in `docs/schema-lint.md` — keep the doc and `domain_contracts.py` in sync.
+`validate`, hard gate on `publish` (any `error` blocks). What it checks:
+- **Object-typed extractors:** known catalog types (§5a), plus promop's **commit contract**
+  (P4, §5). The contract is each `ObjectType.promop_required`, synced from promop. A required field
+  nothing fills is `W101`, and becomes `E110` once that type's `commit_enabled` is flipped in the
+  Django admin. There is no hand-kept per-domain registry.
+- **Legacy `json_schema` extractors:** JSON-Schema subset/compilability and reserved fields, plus
+  `W171`.
+- **Classifier taxonomies:** slugs and thresholds, and each type's `promop_doc_type` against the
+  synced `DocumentType`s (P3).
+
+Full code table in `docs/schema-lint.md` — keep it in sync with `lint/linter.py`.
 
 ### Frontend — `frontend/src/`
 

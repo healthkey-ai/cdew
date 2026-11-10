@@ -40,9 +40,14 @@ class ObjectType(models.Model):
     default_guidance = models.TextField(blank=True, default="")
     extraction_only = models.JSONField(default=list)       # CDEW-only fields, never committed (e.g. specimen)
     commit_required = models.JSONField(default=list)       # promop's required source fields at commit
+    promop_required = models.JSONField(default=list)       # promop's whole required list — the commit contract (P4)
     promop_schema_version = models.CharField(max_length=64, blank=True, default="")
     sort_order = models.PositiveSmallIntegerField(default=0)
     synced_at = models.DateTimeField(null=True, blank=True)
+    # CDEW-owned, never synced: flipped (Django admin) when this type's commit path
+    # goes live (P5, #37). Then a promop-required field CDEW can't fill blocks
+    # publishing an extractor that targets it (W101 → E110, schema-lint §5).
+    commit_enabled = models.BooleanField(default=False)
 
     class Meta:
         db_table = "object_type"
@@ -56,6 +61,24 @@ class ObjectType(models.Model):
         from .catalog import SNAPSHOT_FIELDS
 
         return {f: getattr(self, f) for f in SNAPSHOT_FIELDS}
+
+
+class DocumentType(models.Model):
+    """One of promop's document types (``PatientDocument.doc_type``, P3 #97), synced
+    from its OpenAPI with the object catalog. Each classifier taxonomy type names
+    the one it corresponds to (``promop_doc_type``)."""
+
+    code = models.CharField(max_length=50, unique=True)  # e.g. LAB_RESULTS
+    label = models.CharField(max_length=128)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    synced_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "document_type"
+        ordering = ("sort_order", "code")
+
+    def __str__(self):
+        return self.code
 
 
 class PromptDefinition(models.Model):

@@ -11,9 +11,13 @@ def seed(apps, schema_editor):
     from apps.prompts.catalog import derive_object_types, load_fixture
 
     ObjectType = apps.get_model("prompts", "ObjectType")
+    # Only the fields this migration's model has: later ones (e.g. promop_required)
+    # are backfilled by the migration that adds them.
+    fields = {f.name for f in ObjectType._meta.get_fields()}
     now = timezone.now()
     for d in derive_object_types(load_fixture()):
-        ObjectType.objects.update_or_create(key=d["key"], defaults={**d, "synced_at": now})
+        defaults = {k: v for k, v in d.items() if k in fields and k != "key"}
+        ObjectType.objects.update_or_create(key=d["key"], defaults={**defaults, "synced_at": now})
 
 
 def unseed(apps, schema_editor):

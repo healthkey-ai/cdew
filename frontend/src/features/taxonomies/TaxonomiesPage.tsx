@@ -7,9 +7,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { type PromptVersion, usePromptActions, usePromptDefinitions, usePromptVersions } from "@/features/prompts/api";
+import {
+  type PromptVersion,
+  useDocumentTypes,
+  usePromptActions,
+  usePromptDefinitions,
+  usePromptVersions,
+} from "@/features/prompts/api";
 import { TestSetPanel } from "@/features/prompts/TestSetPanel";
 import { VersionToolbar } from "@/features/prompts/VersionToolbar";
 import { humanize } from "@/lib/utils";
@@ -18,18 +25,27 @@ interface TaxRow {
   type: string;
   prompt: string;
   threshold: number;
+  promop_doc_type: string; // promop's PatientDocument.doc_type (P3, #97); "" = none
 }
 
-const EMPTY_ROW: TaxRow = { type: "", prompt: "", threshold: 0.5 };
+const EMPTY_ROW: TaxRow = { type: "", prompt: "", threshold: 0.5, promop_doc_type: "" };
+const NONE = "__none__"; // Select can't hold "" as a value
 
 // `prompt` is the canonical per-type field; older versions used `description`.
 function toRows(taxonomy: unknown[]): TaxRow[] {
-  return (taxonomy as { type?: string; prompt?: string; description?: string; threshold?: number }[]).map((t) => ({
+  return (
+    taxonomy as { type?: string; prompt?: string; description?: string; threshold?: number; promop_doc_type?: string }[]
+  ).map((t) => ({
     type: t.type ?? "",
     prompt: t.prompt ?? t.description ?? "",
     threshold: typeof t.threshold === "number" ? t.threshold : 0.5,
+    promop_doc_type: t.promop_doc_type ?? "",
   }));
 }
+
+/** Rows as saved: an unset promop document type is left out, not stored as "". */
+const toTaxonomy = (rows: TaxRow[]) =>
+  rows.map(({ promop_doc_type, ...r }) => (promop_doc_type ? { ...r, promop_doc_type } : r));
 
 /** Taxonomies (design §8): the classifier's prompt + the list of document types
  * it scores. Each row is a type with the description that guides classification
@@ -46,6 +62,7 @@ export function TaxonomiesPage() {
   const def = classifiers.find((d) => d.id === defId) ?? null;
   const versions = usePromptVersions(defId);
   const actions = usePromptActions(defId);
+  const docTypes = useDocumentTypes();
 
   const [selVersion, setSelVersion] = useState<PromptVersion | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -73,7 +90,7 @@ export function TaxonomiesPage() {
   const onSave = () => {
     if (!selVersion) return;
     actions.saveDraft.mutate(
-      { id: selVersion.id, prompt_text: prompt, model, taxonomy: rows },
+      { id: selVersion.id, prompt_text: prompt, model, taxonomy: toTaxonomy(rows) },
       { onSuccess: (v) => { setSelVersion(v); toast.success("Draft saved"); } },
     );
   };
@@ -89,8 +106,9 @@ export function TaxonomiesPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           The document types the classifier scores. Add, edit, or remove types; each type carries a
           per-type <span className="font-medium">prompt</span> that the classifier uses{" "}
-          <span className="font-medium">together with</span> the overall Classification prompt below.
-          Edit on a draft, then publish a new version.
+          <span className="font-medium">together with</span> the overall Classification prompt below, and
+          names the <span className="font-medium">promop document type</span> it corresponds to (CDEW-only types
+          use Other). Edit on a draft, then publish a new version.
         </p>
       </div>
 
@@ -161,6 +179,7 @@ export function TaxonomiesPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Type (slug)</TableHead>
+                        <TableHead className="w-44">promop document type</TableHead>
                         <TableHead>Prompt (how to classify it)</TableHead>
                         <TableHead className="w-24">Threshold</TableHead>
                         <TableHead className="w-10" />
@@ -175,8 +194,32 @@ export function TaxonomiesPage() {
                               value={r.type}
                               disabled={!isDraft}
                               onChange={(e) => setRow(i, { type: e.target.value })}
-                              placeholder="lab_report"
+                              placeholder="lab_results"
                             />
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={r.promop_doc_type || NONE}
+                              onValueChange={(v) => setRow(i, { promop_doc_type: !v || v === NONE ? "" : v })}
+                              disabled={!isDraft}
+                            >
+                              <SelectTrigger className="w-44">
+                                <SelectValue>
+                                  {r.promop_doc_type
+                                    ? (docTypes.data?.find((d) => d.code === r.promop_doc_type)?.label ??
+                                      r.promop_doc_type)
+                                    : "— none —"}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={NONE}>— none —</SelectItem>
+                                {(docTypes.data ?? []).map((d) => (
+                                  <SelectItem key={d.code} value={d.code}>
+                                    {d.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="whitespace-normal">
                             <Textarea
@@ -215,7 +258,7 @@ export function TaxonomiesPage() {
                       ))}
                       {rows.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                          <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">
                             No types yet.
                           </TableCell>
                         </TableRow>

@@ -1,13 +1,15 @@
 """Schema shape-lint (docs/schema-lint.md) — the publish gate.
 
-Validates an authored extractor `data` schema (or a classifier taxonomy / a
-prompt) against: the Pydantic-compilable subset, reserved-field rules, and the
-per-domain contract. Returns findings; any error blocks publish.
+Validates an extractor version — its catalog object types, or a legacy authored
+`data` schema (Pydantic-compilable subset, reserved fields) — a classifier
+taxonomy, or a prompt. The commit contract comes from promop's synced object
+schemas (P4, #98), not a hand-kept registry. Returns findings; any error blocks
+publish.
 """
 import re
 from dataclasses import asdict, dataclass
 
-from .domain_contracts import get_contract, known_domains
+from apps.prompts.catalog import uncovered_commit_fields
 
 ALLOWED_TYPES = {"object", "array", "string", "integer", "number", "boolean", "null"}
 ALLOWED_FORMATS = {"date", "date-time", "uuid"}
@@ -99,61 +101,10 @@ def _walk(schema, path, depth, findings, counter):
         _walk(ds, f"{path}.$defs.{dn}", depth + 1, findings, counter)
 
 
-def _resolve_path(schema, path):
-    cur = schema
-    for seg in path.split("."):
-        is_arr = seg.endswith("[]")
-        name = seg[:-2] if is_arr else seg
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get("properties", {}).get(name)
-        if cur is None:
-            return None
-        if is_arr:
-            items = cur.get("items")
-            if not isinstance(items, dict):
-                return None
-            cur = items
-    return cur
-
-
-def _lint_domain(schema, domain, commit_enabled):
-    findings = []
-    if not domain:
-        return findings
-    contract = get_contract(domain)
-    if contract is None:
-        findings.append(Finding("error", "E111", "domain", f"unknown domain '{domain}' (known: {', '.join(known_domains())})"))
-        return findings
-
-    hard = commit_enabled and contract.commit_enabled
-    for fld in contract.required:
-        if _resolve_path(schema, fld.name) is None:
-            findings.append(Finding(
-                "error" if hard else "warning", "E110" if hard else "W101", "data",
-                f"domain '{domain}': required field '{fld.name}' is absent",
-            ))
-    for group in contract.required_any_of:
-        if not any(_resolve_path(schema, n) is not None for n in group):
-            findings.append(Finding(
-                "error" if hard else "warning", "E110" if hard else "W101", "data",
-                f"domain '{domain}': need at least one of {list(group)}",
-            ))
-    for fname, allowed in contract.enum_fields().items():
-        sub = _resolve_path(schema, fname)
-        if sub is None:
-            continue
-        en = sub.get("enum")
-        if en is None:
-            findings.append(Finding("warning", "W102", f"data.{fname}", "field should declare an enum"))
-        else:
-            extra = {v for v in en if v is not None} - set(allowed)
-            if extra:
-                findings.append(Finding("warning", "W102", f"data.{fname}", f"enum values outside the domain set: {sorted(extra)}"))
-    return findings
-
-
-def lint_extractor_schema(schema, domain="", commit_enabled=False):
+def lint_extractor_schema(schema):
+    """A legacy authored `data` schema: structure only (layers 1–3). It has no
+    object type, so there is no promop contract to check it against — W171 tells
+    the author to move it onto the catalog."""
     findings = []
     if not isinstance(schema, dict) or schema.get("type") != "object":
         findings.append(Finding("error", "E010", "data", "root of the data schema must be type: object"))
@@ -171,12 +122,12 @@ def lint_extractor_schema(schema, domain="", commit_enabled=False):
         compile_model(schema, "LintProbe")
     except Exception as exc:
         findings.append(Finding("error", "E030", "data", f"does not compile to a Pydantic model: {type(exc).__name__}"))
-
-    findings += _lint_domain(schema, domain, commit_enabled)
     return findings
 
 
-def lint_taxonomy(taxonomy):
+def lint_taxonomy(taxonomy, known_doc_types=None):
+    """A classifier taxonomy. ``known_doc_types`` (promop's synced document types,
+    P3) checks each type's ``promop_doc_type``; ``None`` skips that check."""
     findings = []
     if not isinstance(taxonomy, list) or not taxonomy:
         findings.append(Finding("error", "E060", "taxonomy", "taxonomy must be a non-empty list"))
@@ -194,6 +145,15 @@ def lint_taxonomy(taxonomy):
         # canonical, ``description`` is the legacy key. Warn only if both empty.
         if not (isinstance(t, dict) and (t.get("prompt") or t.get("description") or "").strip()):
             findings.append(Finding("warning", "W110", f"taxonomy[{i}]", "type has an empty prompt"))
+        if known_doc_types is not None and isinstance(t, dict):
+            code = t.get("promop_doc_type")
+            if not code:
+                findings.append(Finding("warning", "W111", f"taxonomy[{i}]",
+                                        f"type '{ty}' names no promop document type (it will count as OTHER)"))
+            elif code not in known_doc_types:
+                known = ", ".join(sorted(known_doc_types)) or "none synced"
+                findings.append(Finding("error", "E062", f"taxonomy[{i}]",
+                                        f"unknown promop document type '{code}' (known: {known})"))
     return findings
 
 
@@ -206,10 +166,15 @@ def lint_prompt(prompt_text, kind):
     return findings
 
 
-def lint_object_types(object_types, guidance, known_object_types, prompt_text=""):
+def lint_object_types(object_types, guidance, catalog, prompt_text=""):
     """An object-typed extractor (alignment §4.2, schema-lint §5a): a non-empty set of
     known catalog keys, and guidance only for those keys. The fields themselves are
-    the catalog's (synced from promop), so there is no authored schema to lint."""
+    the catalog's (synced from promop), so there is no authored schema to lint.
+
+    ``catalog`` maps key → definition (``ObjectType.definition()`` plus
+    ``commit_enabled``). The commit contract is promop's own required list (P4):
+    a required field nothing fills is W101, or E110 once that type's commit path
+    is live."""
     findings = []
     if not isinstance(object_types, list) or not object_types:
         findings.append(Finding("error", "E070", "object_types", "select at least one object type"))
@@ -218,9 +183,16 @@ def lint_object_types(object_types, guidance, known_object_types, prompt_text=""
     for i, key in enumerate(object_types):
         if key in seen:
             findings.append(Finding("error", "E072", f"object_types[{i}]", f"object type '{key}' is selected twice"))
-        elif key not in known_object_types:
-            known = ", ".join(sorted(known_object_types)) or "none synced"
+        elif key not in catalog:
+            known = ", ".join(sorted(catalog)) or "none synced"
             findings.append(Finding("error", "E071", f"object_types[{i}]", f"unknown object type '{key}' (known: {known})"))
+        else:
+            hard = bool(catalog[key].get("commit_enabled"))
+            for fld in uncovered_commit_fields(catalog[key]):
+                findings.append(Finding(
+                    "error" if hard else "warning", "E110" if hard else "W101", f"object_types[{i}]",
+                    f"promop requires '{fld}' to commit a {key}, and CDEW doesn't extract it",
+                ))
         seen.add(key)
     for key, text in (guidance or {}).items():
         if not isinstance(text, str):
@@ -233,15 +205,15 @@ def lint_object_types(object_types, guidance, known_object_types, prompt_text=""
     return findings
 
 
-def lint_version(kind, *, prompt_text="", json_schema=None, taxonomy=None, domain="", commit_enabled=False,
-                 object_types=None, guidance=None, known_object_types=()):
+def lint_version(kind, *, prompt_text="", json_schema=None, taxonomy=None, object_types=None, guidance=None,
+                 catalog=None, known_doc_types=None):
     findings = list(lint_prompt(prompt_text, kind))
     if kind == "classifier":
-        findings += lint_taxonomy(taxonomy or [])
+        findings += lint_taxonomy(taxonomy or [], known_doc_types)
     elif object_types or not json_schema:
-        findings += lint_object_types(object_types or [], guidance or {}, set(known_object_types), prompt_text)
+        findings += lint_object_types(object_types or [], guidance or {}, catalog or {}, prompt_text)
     else:
-        findings += lint_extractor_schema(json_schema or {}, domain, commit_enabled)
+        findings += lint_extractor_schema(json_schema or {})
         findings.append(Finding("warning", "W171", "data",
                                 "legacy json_schema extractor — select catalog object types instead (alignment §4.2)"))
     errors = [f for f in findings if f.level == "error"]

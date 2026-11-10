@@ -16,8 +16,9 @@ from apps.accounts.permissions import IsPromptAuthor
 from apps.pipeline.models import DryRunJob, JobStatus
 
 from .lint.linter import lint_version
-from .models import ObjectType, PromptDefinition, PromptKind, PromptTestSample, PromptVersion
+from .models import DocumentType, ObjectType, PromptDefinition, PromptKind, PromptTestSample, PromptVersion
 from .serializers import (
+    DocumentTypeSerializer,
     DryRunJobSerializer,
     ObjectTypeSerializer,
     PromptDefinitionSerializer,
@@ -35,6 +36,15 @@ class ObjectTypeViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ObjectType.objects.all()
     serializer_class = ObjectTypeSerializer
     lookup_field = "key"
+    pagination_class = None
+
+
+class DocumentTypeViewSet(viewsets.ReadOnlyModelViewSet):
+    """promop's document types (P3, #97), read-only — what a taxonomy type maps to."""
+
+    queryset = DocumentType.objects.all()
+    serializer_class = DocumentTypeSerializer
+    lookup_field = "code"
     pagination_class = None
 
 
@@ -128,10 +138,10 @@ class PromptVersionViewSet(
             prompt_text=version.prompt_text,
             json_schema=version.json_schema,
             taxonomy=version.taxonomy,
-            domain=d.domain,
             object_types=version.object_types,
             guidance=version.guidance,
-            known_object_types=ObjectType.objects.values_list("key", flat=True),
+            catalog={o.key: {**o.definition(), "commit_enabled": o.commit_enabled} for o in ObjectType.objects.all()},
+            known_doc_types=set(DocumentType.objects.values_list("code", flat=True)),
         )
 
     def update(self, request, *args, **kwargs):

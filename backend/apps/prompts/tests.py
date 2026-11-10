@@ -28,21 +28,34 @@ class ModelSettingsTests(SimpleTestCase):
 
 
 class ResolveTests(TestCase):
-    def test_active_classifier_seeded(self):
+    def test_active_classifier_is_promop_aligned(self):
+        # Migration 0011 (P3, #97): v2 is promop's document types + CDEW's additions.
         v = get_active_classifier()
         assert v.definition.key == CLASSIFIER_KEY
-        assert v.status == "published"
-        assert len(v.taxonomy) == 7
+        assert v.status == "published" and v.version == 2
+        by_type = {t["type"]: t["promop_doc_type"] for t in v.taxonomy}
+        assert by_type["lab_results"] == "LAB_RESULTS" and by_type["bone_marrow"] == "BONE_MARROW"
+        assert by_type["office_visit"] == by_type["immunohistochemistry"] == "OTHER"  # CDEW additions
+        from apps.prompts.models import DocumentType
+
+        promop = set(DocumentType.objects.values_list("code", flat=True))
+        assert set(by_type.values()) <= promop
+        # every promop type is covered except the catch-all OTHER (unclassified → human queue)
+        assert promop - set(by_type.values()) == set()
+        assert "lab_report" not in by_type  # old slugs gone; v1 kept for its classifications
+        assert v.definition.versions.get(version=1).taxonomy[0]["type"] == "lab_report"
 
     def test_resolve_extractors_by_trigger(self):
-        assert [e.key for e in resolve_extractors(["lab_report"])] == ["lab_report"]
-        # genetics_report extractor triggers on bone_marrow_biopsy too
-        assert [e.key for e in resolve_extractors(["bone_marrow_biopsy"])] == ["genetics_report"]
+        assert [e.key for e in resolve_extractors(["lab_results"])] == ["lab_report"]
+        # genetics_report extractor triggers on every genetics doc type + bone marrow
+        for t in ("fish", "cytogenetics", "ngs", "mrd", "gep", "bone_marrow"):
+            assert [e.key for e in resolve_extractors([t])] == ["genetics_report"], t
         # a taxonomy type with no extractor (human-route) resolves to nothing
-        assert resolve_extractors(["flow_cytometry"]) == []
+        assert resolve_extractors(["cytometry"]) == []
+        assert resolve_extractors(["lab_report"]) == []  # the old slug no longer routes
 
     def test_resolve_extractors_union_dedup(self):
-        keys = {e.key for e in resolve_extractors(["lab_report", "genetics_report"])}
+        keys = {e.key for e in resolve_extractors(["lab_results", "fish", "ngs"])}
         assert keys == {"lab_report", "genetics_report"}
 
 
