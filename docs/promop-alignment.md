@@ -273,27 +273,43 @@ promop is the **identity host** for the HealthKey family. It serves the family a
 - **Firebase** is supported as an **org-owned identity provider**. "No Firebase anywhere in the
   family" means HealthKey runs none of its own.
 
+**CDEW is a standalone admin app, like PRISM** *(revised 2026-11-09, #31)*. PRISM integrates
+by sharing promop's database, `SECRET_KEY` and session cookie. CDEW instead keeps its **own**
+database and secrets and uses promop's **API** only, because it stages PHI and writes to promop.
+Patients never use CDEW; staff process documents **on their behalf**.
+
 **Two uses in CDEW, separate from the service token in §2.6:**
 
-1. **CDEW users sign in with a promop-hosted or an org's Firebase account** (#31, ported from
+1. **Staff sign in with a promop, phr or org-owned Firebase account** (#31 Part A, ported from
    hk-labs).
    - **Mechanism:** `PartnerAuthentication` routes each token by its `iss`.
-     - `PhrTokenProvider` takes promop family tokens, with `PHR_ISSUER`/`PHR_JWKS_URL` set to
-       promop's family auth.
+     - **Two entries in a trusted-issuer map** (`{issuer: jwks_url}`), both verified by the JWKS
+       provider (hk-labs' `PhrTokenProvider`): promop's family-auth issuer
+       (`…/api/v1/family/auth/jwks/`), and a phr installation's issuer (`…/api/v1/auth/jwks/`).
+       hk-labs trusts a single `PHR_ISSUER`; CDEW needs several.
      - `FirebaseTokenProvider` takes Firebase ID tokens.
-     - Both map to `Identity(issuer, sub)`. The frontend exchanges the token for a CDEW JWT pair
-       at `partner-token/`.
+     - All map to `Identity(issuer, sub)`. The login page offers each configured host and
+       exchanges its token for a CDEW JWT pair at `partner-token/`.
+     - No introspection URLs.
    - **Roles** (reviewer, prompt author, admin) stay local, and providers' role claims are never
      auto-granted.
    - **Fix CDEW's `Identity.sub`** global unique (hk-labs #59), so two issuers can share a `sub`.
 
-2. **How a document's patient is identified (D1, #112).** There are three routes:
+2. **How a document's patient is chosen (D1, #112).** Staff act on behalf of patients:
 
-| Document source | How CDEW gets `person_id` | Organization |
+| Case | How CDEW gets `person_id` | Organization |
 |---|---|---|
-| A patient uploads through a PHR installation | The patient's own family token carries `person_id`. No provisioning or email match. | The installation's org |
-| Staff uploads for an **existing** patient | The reviewer picks the patient from promop **with their own family token**. promop applies that user's access rules; CDEW's service token never reads patient records. This settles 13.5. | From the chosen Person |
+| **Existing** patient, staff signed in **via promop** | The staff member picks the patient from promop **with their own family token**. promop applies that user's access rules; CDEW's service token never reads patient records. This settles 13.5. | From the chosen Person |
+| **Existing** patient, staff signed in **via phr or Firebase** | No promop credential to delegate. D1 picks one: (a) link the staff identity to a promop account; (b) a narrow patient-search grant for CDEW's service token; or (c) email match via `persons/provision`, with 409 → human. | From the chosen Person |
 | A **new** patient | `persons/provision` with email + organization; a 409 goes to a human (§8 step 1) | Given on provision |
+
+- **Organization scope.** Each staff member acts only for organizations they are allowed: promop's
+  `group_access` / `org_trust` when signed in via promop (as PRISM reads them), otherwise CDEW-local
+  grants managed by CDEW admins.
+- **Audit.** The acting staff identity is recorded on every record, plus an authorisation
+  attestation at upload.
+- *An earlier route, where a patient's own PHR token carried `person_id`, was dropped with the
+  standalone direction.*
 
 The **source hospital** (`X-Provenance-Organization-ID`) always comes with the document — upload
 details now, FHIR metadata in Phase 8 — never from anyone's sign-in.
@@ -1044,9 +1060,10 @@ its header. From the document page they ad-hoc-select `observation` and run:
    2026-10-01; was: OIDC actor identity via `find_or_create`, now closed to services)*.
    Provision with email + organization; email matching links unclaimed Persons, and a
    claimed or ambiguous match goes to a human (§8 step 1, 13.5).
-   *Extended 2026-11-09 (§2.7):* that is one of three routes. A PHR-uploaded document takes
-   `person_id` from the patient's own family token, and staff link an existing patient through a
-   picker that uses their own promop sign-in. The design is in #112.
+   *Extended 2026-11-09 (§2.7):* staff act on behalf of patients. Staff signed in via promop link
+   an existing patient through a picker that uses their own promop sign-in. Staff signed in via phr
+   or Firebase need a fallback, still to be decided. New patients go through `provision`. The
+   design is in #112.
 3. **Rich provenance stays in CDEW.** CDEW is the authority for char-span/bbox/snippet; promop
    gets the coarse `ProvenanceRecord(source=DOCUMENT_EXTRACTION)` only.
 4. **Sync surface** — OpenAPI fetch + snapshot (not a shared package), so CDEW stays decoupled.
@@ -1146,10 +1163,11 @@ back on each `ExtractionRecord` → an authoritative **document → promop-fact*
    now matches unclaimed Persons by email (§2.5). Still open: (a) a patient with **no email**
    is always minted new; (b) a **claimed** match returns its `person_id` in the 409 — may CDEW
    then write to that Person, or must a human confirm first? (Plan: human confirms.)
-   *2026-11-09:* (b) is answered by design. Existing patients, claimed or not, are linked by a
-   reviewer through a promop patient picker using the reviewer's own family token, so promop's
-   access rules decide (§2.7). The endpoint to confirm is promop#2405. (a) remains for brand-new
-   patients without an email.
+   *2026-11-09:* (b) is answered by design **for staff signed in via promop**. Existing patients,
+   claimed or not, are linked by a reviewer through a promop patient picker using the reviewer's
+   own family token, so promop's access rules decide (§2.7); the endpoint to confirm is
+   promop#2405. Staff signed in via phr or Firebase need D1's fallback (#112). (a) remains for
+   brand-new patients without an email.
 6. ~~**Service scopes.**~~ *Resolved 2026-10-20:* `system/etl.write` covers the per-type
    endpoints (`EtlPatientCrudPermission`) — see §2.6, decision #6.
 7. ~~**Org scoping / hospital attribution.**~~ *Resolved 2026-10-20:* #1690 is merged; a

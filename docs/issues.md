@@ -105,7 +105,7 @@ long-running LLM work onto a real Prefect engine locally (design §6), and compl
 
 | Milestone | Covers |
 |-----------|--------|
-| **Staging** | Stand up the shared GCP staging env (`dev` → staging) |
+| **Staging** | Stand up the shared staging env (`dev` → staging): now on Render (#31 Part C); originally GCP |
 | **Production** | Promote to prod (`main` → production) |
 | **UX polish** | Finalize the admin SPA pages built in v1 |
 | **Platform** | Auth/SSO, scaling, observability |
@@ -149,7 +149,7 @@ with a task-list linking its child issues.
 | IS-021 | Pipeline log UI (job history + Prefect run link) | frontend | P2 | UX polish | — |
 | IS-022 | Validation UI: full review / classification / low-confidence queues | frontend | P1 | UX polish | — |
 | IS-023 | Integrate `hk-identity` package (replace vendored Identity) | auth/backend | P1 | Platform | — |
-| IS-024 | Partner auth like hk-labs: Firebase (org-owned IdP) + promop-hosted family tokens | auth/backend | P1 | Platform | — |
+| IS-024 | Standalone admin app like PRISM: staff sign-in via promop / phr / Firebase · on-behalf-of-patient processing · Render deployment | auth/backend/infra | P1 | Platform | — |
 | IS-025 | Additional extractors: imaging, diagnoses, medications, procedures | llm/backend | P2 | Extraction+ | — |
 | IS-026 | LOINC three-tier matcher for labs (port hk-labs) | backend | P2 | M5 — Commit | — |
 | IS-027 | SNOMED / RxNorm / UCUM coding via OMOP vocab (pin Athena) | backend | P2 | M5 — Commit | IS-026 |
@@ -166,8 +166,13 @@ with a task-list linking its child issues.
 
 ## Epic 1 — Staging on GCP  ·  `type:epic` `area:infra` `P0` · Milestone: Staging
 
+> **Superseded for staging (2026-11-09).** Staging now goes **on Render, independently, like PRISM**:
+> a `render.yaml` in this repo with its own Postgres, deployed after CI (#31 Part C; `TODO.md` →
+> *Setup staging on Render*). The GCP tickets below (#4–#14) stay as the reference if production
+> moves to GCP. Production's host is undecided.
+
 Stand up the first shared, PHI-safe environment (`dev` → staging). BAA-covered services only; no PHI
-in logs. Source: `TODO.md` → *Deployment / Ops → Setup staging on GCP*; design §2, §6.
+in logs. Source: `TODO.md` → *Deployment / Ops*; design §2, §6.
 
 ### IS-001 — IaC baseline (Terraform) + GCP project/env scaffolding
 `area:infra` `type:chore` `P0`
@@ -410,23 +415,29 @@ In-code `TODO(auth)` in `apps/accounts/models.py`; design §11.
   (`AUTH_USER_MODEL`) for its model; **keep `RoleAssignment` local**; migration/data path.
 - **Acceptance:** identity comes from the package; local role grants + gates unchanged; tests green.
 
-### IS-024 — Partner auth like hk-labs: Firebase + promop-hosted family tokens
-`area:auth` `area:backend` `type:feature` `P1` · *rescoped 2026-11-09 (#31)*
-- **Scope:** port hk-labs' partner auth (`backend/apps/accounts/`).
+### IS-024 — Standalone admin app like PRISM: staff sign-in via promop / phr / Firebase
+`area:auth` `area:backend` `area:infra` `type:feature` `P1` · *rescoped 2026-11-09 (#31)*
+
+CDEW is a standalone admin app integrated with promop over its API, with its own DB and secrets
+(unlike PRISM's shared DB). Staff process documents on behalf of patients.
+- **Part A, sign-in:** port hk-labs' partner auth (`backend/apps/accounts/`).
   - A `TokenProvider` base with `can_handle` routing by unverified `iss`.
-  - `FirebaseTokenProvider` (`firebase-admin`, optional revocation check).
-  - `PhrTokenProvider`: RS256 via cached JWKS plus introspection. promop-hosted users come in
-    through it with `PHR_ISSUER`/`PHR_JWKS_URL` set to promop's family auth.
-  - A verified-token cache, a 401 challenge, and auto-provisioning.
-  - A `POST /api/v1/auth/partner-token/` exchange.
-  - Fix `Identity.sub`'s global unique (hk-labs #59).
-  - CDEW differences: providers off by default, lazy Firebase init, PHI-safe logs, an optional
-    audience check.
-  - Roles stay local; local login stays for dev.
-- **Acceptance:** Firebase and promop tokens each authenticate and exchange for a CDEW pair, with
-  only locally granted roles. Bad issuer, bad signature and expired tokens get 401. Same-`sub`
-  identities from two issuers coexist.
-- *Was: a Firebase-only provider after IS-023. No longer depends on IS-023.*
+  - A **trusted-issuer map**, so **promop** family auth and a **phr** installation verify by JWKS
+    side by side (hk-labs trusts one issuer). No introspection.
+  - `FirebaseTokenProvider` (`firebase-admin`).
+  - A verified-token cache, a 401 challenge, auto-provisioning, and a `partner-token/` exchange.
+  - Fix `Identity.sub`'s global unique (hk-labs #59). Local roles only.
+- **Part B, on behalf of patients:** a promop patient picker using the staff member's own promop
+  sign-in (phr and Firebase sign-ins need D1's fallback, #112), provisioning for new patients,
+  per-staff organization scope, and the acting staff identity plus an attestation on every record.
+- **Part C, Render:** a `render.yaml` in this repo (own Postgres, migrate pre-deploy, GCS for
+  originals, thread dispatch first), deployed after CI. Real PHI waits on a BAA-covered workspace
+  and #102.
+- **Acceptance:** promop, phr and Firebase staff accounts each sign in with only locally granted
+  roles; bad issuer, bad signature and expired tokens get 401; same-`sub` identities from two issuers
+  coexist; a reviewer attaches documents only within their organizations; a merge to `dev` deploys
+  to Render after CI.
+- *Was: a Firebase-only provider after IS-023, then a phr-embedded remote; both superseded.*
 
 ---
 
