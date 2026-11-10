@@ -25,6 +25,7 @@ import {
 import { TestSetPanel } from "@/features/prompts/TestSetPanel";
 import { VersionToolbar } from "@/features/prompts/VersionToolbar";
 import { humanize } from "@/lib/utils";
+import { ExtractorHeader } from "./ExtractorHeader";
 import { NewExtractorDialog } from "./NewExtractorDialog";
 import { ObjectTypesEditor } from "./ObjectTypesEditor";
 import { RoutingEditor } from "./RoutingEditor";
@@ -135,7 +136,8 @@ export function ExtractorsPage() {
                   (d.enabled ? "" : " opacity-60")
                 }
               >
-                <span className="font-mono">{d.key}</span>
+                <span>{d.name || d.key}</span>
+                <span className="font-mono text-[11px] text-muted-foreground">{d.key}</span>
                 <span className="text-xs text-muted-foreground">
                   {d.active_version ? `v${d.active_version.version}` : "draft only"}
                   {!d.enabled && " · disabled"}
@@ -160,7 +162,7 @@ export function ExtractorsPage() {
           <Tabs defaultValue="editor">
             <div className="flex items-center gap-2">
               <TabsList>
-                <TabsTrigger value="editor">{humanize(def.key)}</TabsTrigger>
+                <TabsTrigger value="editor">{def.name || humanize(def.key)}</TabsTrigger>
                 <TabsTrigger value="testset">Test Set</TabsTrigger>
               </TabsList>
               {selVersion && objectMode
@@ -175,7 +177,13 @@ export function ExtractorsPage() {
             <TabsContent value="editor" className="mt-4">
               <Card>
                 <CardContent className="space-y-4">
-              {def.description && <p className="text-sm text-muted-foreground">{def.description}</p>}
+              <ExtractorHeader
+                def={def}
+                onDeleted={() => {
+                  setDefId(null);
+                  setSelVersion(null);
+                }}
+              />
               <RoutingEditor def={def} taxonomyTypes={taxonomyTypes} />
 
               <VersionToolbar

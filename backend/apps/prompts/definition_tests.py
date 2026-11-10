@@ -87,6 +87,24 @@ class ExtractorDefinitionTests(APITestCase):
         assert self.client.delete(f"{URL}{classifier.id}/").status_code == 409
         assert self.client.delete(f"{URL}{definition_id}/").status_code == 204  # never ran
 
+    def test_rename_and_describe(self):
+        definition_id = self.create().json()["id"]
+        r = self.client.patch(f"{URL}{definition_id}/", {"name": "Visit notes", "description": "Progress notes."},
+                              format="json")
+        assert r.status_code == 200, r.content
+        assert (r.json()["name"], r.json()["description"], r.json()["key"]) == (
+            "Visit notes", "Progress notes.", "office_visit")
+
+    def test_deleting_an_unused_extractor_removes_its_versions_and_test_set(self):
+        from apps.prompts.models import PromptTestSample, PromptVersion
+
+        definition_id = self.create().json()["id"]
+        PromptTestSample.objects.create(definition_id=definition_id, document=self._doc(), label="visit")
+        assert self.client.delete(f"{URL}{definition_id}/").status_code == 204
+        assert not PromptDefinition.objects.filter(id=definition_id).exists()
+        assert not PromptVersion.objects.filter(definition_id=definition_id).exists()
+        assert not PromptTestSample.objects.filter(definition_id=definition_id).exists()
+
     def test_reviewers_cannot_create(self):
         self.as_user(_user("rev@x.org", Role.REVIEWER))
         assert self.create().status_code == 403
