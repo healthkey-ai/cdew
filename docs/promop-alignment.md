@@ -233,6 +233,46 @@ gains a small "hold until mapped" step for unresolved terms instead of a bundle 
   through `ApplicationOrganization` — writes confined to that org's patients, and provenance
   `organization` set.
 
+### 2.7 Family identity: user sign-in and the patient's identity *(added 2026-11-09)*
+**Sources:** phr `docs/identity-architecture.md` and promop `docs/family-auth.md`.
+
+promop is the **identity host** for the HealthKey family. It serves the family auth contract at
+`/api/v1/family/auth/` (`login/`, `refresh/`, `logout/`, `me/`, `jwks/`, `introspect/`).
+- **Its tokens:** RS256 access tokens with `iss` = promop's origin, `aud` = `FAMILY_AUTH_AUDIENCE`,
+  `sub` = the Identity's uid, `email`, `email_verified`, `identity_level`, role `claims`, and
+  `person_id`.
+- **Siblings** (labs, soc, exact) verify them against promop's JWKS. A multi-issuer registry is
+  planned.
+- **Each PHR installation is one promop organization.**
+- **No Firebase anywhere in the family.**
+
+**Two uses in CDEW, separate from the service token in §2.6:**
+
+1. **CDEW users sign in with promop accounts** (#31).
+   - **Mechanism:** a `PartnerAuthentication` provider verifies the family token and maps it to
+     `Identity(issuer, sub)`. CDEW's vendored `Identity` already has that shape.
+   - **Roles** (reviewer, prompt author, admin) stay local, and promop's role claims are never
+     auto-granted.
+   - **Config** is an `{issuer: jwks_url}` map, so promop's registry drops in later.
+   - Replaces the Firebase provider design §11 used to plan.
+
+2. **How a document's patient is identified (D1, #112).** There are three routes:
+
+| Document source | How CDEW gets `person_id` | Organization |
+|---|---|---|
+| A patient uploads through a PHR installation | The patient's own family token carries `person_id`. No provisioning or email match. | The installation's org |
+| Staff uploads for an **existing** patient | The reviewer picks the patient from promop **with their own family token**. promop applies that user's access rules; CDEW's service token never reads patient records. This settles 13.5. | From the chosen Person |
+| A **new** patient | `persons/provision` with email + organization; a 409 goes to a human (§8 step 1) | Given on provision |
+
+The **source hospital** (`X-Provenance-Organization-ID`) always comes with the document — upload
+details now, FHIR metadata in Phase 8 — never from anyone's sign-in.
+
+**Open on promop (promop#2405):**
+- **Add CDEW's audience** to `FAMILY_AUTH_AUDIENCE`.
+- **Settle the `org` claim.** The phr doc says promop-hosted tokens carry `org`; promop's
+  `family-auth.md` lists no `org`.
+- **Name the patient-search endpoint** for the user-delegated picker.
+
 ---
 
 ## 3. The object catalog
@@ -923,6 +963,9 @@ its header. From the document page they ad-hoc-select `observation` and run:
    2026-10-01; was: OIDC actor identity via `find_or_create`, now closed to services)*.
    Provision with email + organization; email matching links unclaimed Persons, and a
    claimed or ambiguous match goes to a human (§8 step 1, 13.5).
+   *Extended 2026-11-09 (§2.7):* that is one of three routes. A PHR-uploaded document takes
+   `person_id` from the patient's own family token, and staff link an existing patient through a
+   picker that uses their own promop sign-in. The design is in #112.
 3. **Rich provenance stays in CDEW.** CDEW is the authority for char-span/bbox/snippet; promop
    gets the coarse `ProvenanceRecord(source=DOCUMENT_EXTRACTION)` only.
 4. **Sync surface** — OpenAPI fetch + snapshot (not a shared package), so CDEW stays decoupled.
@@ -1002,7 +1045,10 @@ human breadcrumb (no promop schema change). **No promop FK requested.**
    now matches unclaimed Persons by email (§2.5). Still open: (a) a patient with **no email**
    is always minted new; (b) a **claimed** match returns its `person_id` in the 409 — may CDEW
    then write to that Person, or must a human confirm first? (Plan: human confirms.)
-   *(Ask promop about (b).)*
+   *2026-11-09:* (b) is answered by design. Existing patients, claimed or not, are linked by a
+   reviewer through a promop patient picker using the reviewer's own family token, so promop's
+   access rules decide (§2.7). The endpoint to confirm is promop#2405. (a) remains for brand-new
+   patients without an email.
 6. ~~**Service scopes.**~~ *Resolved 2026-10-20:* `system/etl.write` covers the per-type
    endpoints (`EtlPatientCrudPermission`) — see §2.6, decision #6.
 7. ~~**Org scoping / hospital attribution.**~~ *Resolved 2026-10-20:* #1690 is merged; a
@@ -1024,11 +1070,13 @@ human breadcrumb (no promop schema change). **No promop FK requested.**
     CDEW setting: the minimum document count worth sending (plan default 3).
 13. **Lookup re-checks inflate sightings.** Each unresolved lookup counts as a sighting in
     promop's queue (promop #2125). Text terms have no per-patient rows, so CDEW re-checking the
-    same fact keeps raising the count curators use to prioritise. *(Ask promop for a non-counting
-    re-check mode; until then CDEW re-checks at most daily per term.)*
+    same fact keeps raising the count curators use to prioritise. *Asked in
+    [promop#2403](https://github.com/healthkey-ai/promop/issues/2403) (a non-counting re-check
+    mode); until then CDEW re-checks at most daily per term.*
 14. **Field metadata for the prompt** (cdew#103). Value kind, unit, allowed values and computed
-    role per relevance concept are not in the relevance response. *(Ask promop: add them to the
-    concepts, or open the deployment-level `writable-fields` descriptor to `system/*.read`.)*
+    role per relevance concept are not in the relevance response. *Asked in
+    [promop#2404](https://github.com/healthkey-ai/promop/issues/2404): add them to the concepts,
+    or open the deployment-level `writable-fields` descriptor to `system/*.read`.*
 
 ### 13a. Asks for the promop team (status as of 2026-11-09, promop `origin/dev` @ `30d561cf`)
 
@@ -1037,11 +1085,16 @@ human breadcrumb (no promop schema change). **No promop FK requested.**
    2026-08-20, and `genomics.py` still clears `qualifier_concept`. promop#1245 (idempotent genomics
    import) is open. **Blocks committing genomic findings** (plan workstream G).
 2. **Non-counting lookup re-check** (13.13), so CDEW's re-checks of unresolved terms don't inflate
-   curators' sighting counts. *(To file.)*
+   curators' sighting counts. [promop#2403](https://github.com/healthkey-ai/promop/issues/2403).
 3. **Field metadata for relevance concepts** (13.14, cdew#103): value kind, unit, allowed values,
-   computed role. *(To file.)*
-4. **Claimed-Person links** (13.5b) — may a service write to a Person returned in a
-   `claimed: true` 409, and what consent applies?
+   computed role. [promop#2404](https://github.com/healthkey-ai/promop/issues/2404).
+4. **Family auth for CDEW** (§2.7) —
+   [promop#2405](https://github.com/healthkey-ai/promop/issues/2405).
+   - Add CDEW's audience.
+   - Settle the `org` claim (the docs disagree).
+   - Confirm the patient-search endpoint for a reviewer-delegated picker. This **replaces the
+     earlier "claimed-Person links" ask**: an existing patient, claimed or not, is linked by a
+     reviewer with access, not by the service.
 5. **Honour `DOCUMENT_EXTRACTION` for service writes in `lab-results/sync` and `fhir/sync`** —
    still `ADMIN_CORRECTION` / `EHR_SYNC` on 2026-11-09. Not blocking: CDEW commits through the
    per-type endpoints, which honour the header.

@@ -149,7 +149,7 @@ with a task-list linking its child issues.
 | IS-021 | Pipeline log UI (job history + Prefect run link) | frontend | P2 | UX polish | — |
 | IS-022 | Validation UI: full review / classification / low-confidence queues | frontend | P1 | UX polish | — |
 | IS-023 | Integrate `hk-identity` package (replace vendored Identity) | auth/backend | P1 | Platform | — |
-| IS-024 | Firebase `PartnerAuthentication` provider (SSO) | auth/backend | P1 | Platform | IS-023 |
+| IS-024 | Accept promop family-auth tokens (`PartnerAuthentication` provider; replaces Firebase) | auth/backend | P1 | Platform | — |
 | IS-025 | Additional extractors: imaging, diagnoses, medications, procedures | llm/backend | P2 | Extraction+ | — |
 | IS-026 | LOINC three-tier matcher for labs (port hk-labs) | backend | P2 | M5 — Commit | — |
 | IS-027 | SNOMED / RxNorm / UCUM coding via OMOP vocab (pin Athena) | backend | P2 | M5 — Commit | IS-026 |
@@ -410,11 +410,16 @@ In-code `TODO(auth)` in `apps/accounts/models.py`; design §11.
   (`AUTH_USER_MODEL`) for its model; **keep `RoleAssignment` local**; migration/data path.
 - **Acceptance:** identity comes from the package; local role grants + gates unchanged; tests green.
 
-### IS-024 — Firebase `PartnerAuthentication` provider (SSO)
-`area:auth` `area:backend` `type:feature` `P1` · after IS-023
-- **Scope:** implement a Firebase provider behind `PARTNER_AUTH_PROVIDERS` (Firebase ID-token → house
-  JWT, `firebase-admin` already a dep); real CDM users sign in via SSO (local login stays for dev).
-- **Acceptance:** a Firebase token authenticates and resolves to an Identity + local roles.
+### IS-024 — Accept promop family-auth tokens (replaces Firebase)
+`area:auth` `area:backend` `type:feature` `P1` · *rescoped 2026-11-09 (#31)*
+- **Scope:** a provider behind `PARTNER_AUTH_PROVIDERS` that verifies promop's family-auth RS256
+  access token (JWKS, `iss`, `aud` = CDEW, expiry) and maps it to `Identity` by `(issuer, sub)`.
+  Roles stay local. Config is an `{issuer: jwks_url}` map. Drop `firebase-admin`. Local login stays
+  for dev.
+- **Acceptance:** a promop family token authenticates and resolves to an Identity with only locally
+  granted roles; bad `iss`/`aud`/signature and expired tokens are rejected.
+- *Was: a Firebase ID-token provider. Superseded by the family identity architecture (no Firebase in
+  the HealthKey family). No longer depends on IS-023.*
 
 ---
 
