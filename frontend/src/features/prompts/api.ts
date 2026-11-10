@@ -38,6 +38,14 @@ export function useDefinitionActions() {
         (await api.patch<PromptDefinition>(`${P}/definitions/${id}/`, d)).data,
       onSuccess: invalidate,
     }),
+    /** Delete an extractor — refused (409) once it has produced facts; disable it instead. */
+    remove: useMutation({
+      mutationFn: async (id: number) => {
+        await api.delete(`${P}/definitions/${id}/`);
+        return id;
+      },
+      onSuccess: invalidate,
+    }),
   };
 }
 
