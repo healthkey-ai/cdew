@@ -299,12 +299,17 @@ class PromptTestSetTests(APITestCase):
 
         s.expected_payload = gold
         s.save()
-        assert self._dry_run(self.lab)["summary"]["passed"] == 1
+        summary = self._dry_run(self.lab)["summary"]
+        assert summary["passed"] == 1
+        assert (summary["tp"], summary["fp"], summary["fn"]) == (len(gold), 0, 0)
+        assert summary["precision"] == summary["recall"] == summary["f1"] == 1.0
 
         s.expected_payload = [{"totally": "wrong"}]
         s.save()
         job = self._dry_run(self.lab)
         assert job["summary"]["scored"] == 1 and job["summary"]["passed"] == 0
+        assert (job["summary"]["tp"], job["summary"]["fp"], job["summary"]["fn"]) == (0, len(gold), 1)
+        assert job["summary"]["precision"] == job["summary"]["recall"] == 0.0
 
         # Same data under another object type is a different fact.
         s.expected_payload = [{**row, "object_type": "observation"} for row in gold]
@@ -323,7 +328,20 @@ class PromptTestSetTests(APITestCase):
 
         s.expected_payload = [*routed, "bogus_type"]
         s.save()
-        assert self._dry_run(self.classifier)["summary"]["passed"] == 0
+        summary = self._dry_run(self.classifier)["summary"]
+        assert summary["passed"] == 0
+        # Type labels: every routed type is right (precision 1), one expected type missed.
+        assert (summary["tp"], summary["fp"], summary["fn"]) == (len(routed), 0, 1)
+        assert summary["recall"] == round(len(routed) / (len(routed) + 1), 4)
+
+    def test_fact_counts_are_multiset_and_ratios_none_without_gold(self):
+        from apps.pipeline.dryrun import _fact_counts, summarize
+
+        a, b, c = {"object_type": "measurement", "v": 1}, {"object_type": "measurement", "v": 2}, {"x": 1}
+        # A duplicated fact matches once; unset fields don't count.
+        assert _fact_counts([a, a, {**b, "unit": None}], [a, b, c]) == {"tp": 2, "fp": 1, "fn": 1}
+        empty = summarize([{"sample_id": 1}])  # extracted, no gold → nothing scored
+        assert empty["scored"] == 0 and empty["precision"] is None and empty["f1"] is None
 
     def test_extract_saves_extracted_payload(self):
         s = self._sample(self.lab)
