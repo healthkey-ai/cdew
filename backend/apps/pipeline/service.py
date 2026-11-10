@@ -54,6 +54,8 @@ def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
     doc = job.document
     if job.ad_hoc_version_id:
         return _execute_ad_hoc(job, doc, runner)
+    if job.classify_requested:
+        return _execute_classify(job, doc, runner)
 
     job.status = JobStatus.RUNNING
     job.stage = Stage.PARSE
@@ -86,6 +88,22 @@ def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
         doc.save(update_fields=["status", "updated_at"])
         return _finish(job, JobStatus.COMPLETED)
 
+    return _classify_and_extract(job, doc, runner)
+
+
+def _execute_classify(job: ExtractionJob, doc, runner) -> ExtractionJob:
+    """A reviewer's "Classify now" (``classify_requested``): classify the
+    already-parsed document and extract what it routes to, whatever
+    PIPELINE_AUTO_CLASSIFY says. No re-parse — the text facts point into stays."""
+    job.status = JobStatus.RUNNING
+    job.started_at = timezone.now()
+    job.save(update_fields=["status", "started_at", "updated_at"])
+    if not hasattr(doc, "text"):
+        return _finish(job, JobStatus.FAILED, errors=[{"code": "not_parsed"}])
+    return _classify_and_extract(job, doc, runner)
+
+
+def _classify_and_extract(job: ExtractionJob, doc, runner) -> ExtractionJob:
     job.stage = Stage.CLASSIFY
     job.progress = 0.6
     _stamp(job, Stage.CLASSIFY)

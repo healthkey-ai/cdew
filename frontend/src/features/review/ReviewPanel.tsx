@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, FileText, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
+import { Check, FileText, Image as ImageIcon, Loader2, Plus, Sparkles, Wand2, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   type ExtractionRecord,
   type Geometry,
+  useClassifyDocument,
   useDocument,
   useDocumentExtractions,
   useDocumentText,
@@ -405,6 +406,7 @@ export function ReviewPanel({ docId }: { docId: number }) {
   useEffect(() => {
     if (job && !isJobActive(job.status)) {
       qc.invalidateQueries({ queryKey: ["documents", docId, "extractions"] });
+      qc.invalidateQueries({ queryKey: ["documents", docId, "detail"] }); // status, e.g. after Classify
     }
   }, [job?.status, docId, qc]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -414,6 +416,7 @@ export function ReviewPanel({ docId }: { docId: number }) {
 
   const [addOpen, setAddOpen] = useState(false);
   const [adHocOpen, setAdHocOpen] = useState(false);
+  const classify = useClassifyDocument();
   const [newSnippet, setNewSnippet] = useState("");
   const [newType, setNewType] = useState("measurement");
   const [newFields, setNewFields] = useState<Record<string, string>>({});
@@ -505,6 +508,27 @@ export function ReviewPanel({ docId }: { docId: number }) {
             <div className="flex shrink-0 items-center justify-between">
               <h3 className="text-sm font-semibold">Facts{facts.data ? ` (${facts.data.length})` : ""}</h3>
               <div className="flex gap-1.5">
+                {doc.data?.status === "needs_classification" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    disabled={extracting || classify.isPending}
+                    title="Classify this document and run the extractors it routes to"
+                    onClick={() =>
+                      classify.mutate(docId, {
+                        onSuccess: () => toast.info("Classifying…"),
+                        onError: (err) =>
+                          toast.error(
+                            (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ??
+                              "Could not classify",
+                          ),
+                      })
+                    }
+                  >
+                    <Wand2 className="size-4" /> Classify
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"

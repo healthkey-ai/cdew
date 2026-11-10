@@ -24,6 +24,30 @@ from .serializers import (
 logger = logging.getLogger("apps.documents")
 
 
+def _busy_or_unparsed(doc):
+    """A 409 for a reviewer-started job on a document that can't take one, else None."""
+    if not hasattr(doc, "text"):
+        return Response({"detail": "Parse the document first."}, status=status.HTTP_409_CONFLICT)
+    if doc.jobs.filter(status__in=[JobStatus.QUEUED, JobStatus.RUNNING]).exists():
+        return Response({"detail": "This document is already being processed."}, status=status.HTTP_409_CONFLICT)
+    return None
+
+
+def _start(job):
+    """Dispatch a reviewer-started job; if dispatch itself fails (e.g. deployment
+    mode with no worker), fail the job cleanly instead of 500-ing or orphaning it."""
+    try:
+        dispatch_extract(job.id)
+    except Exception:
+        logger.warning("pipeline: dispatch failed job=%s", job.id)  # safe code only, never PHI
+        job.status, job.stage, job.progress = JobStatus.FAILED, Stage.DONE, 1.0
+        job.errors = [{"code": "dispatch_failed"}]
+        job.finished_at = timezone.now()
+        job.save(update_fields=["status", "stage", "progress", "errors", "finished_at", "updated_at"])
+    job.refresh_from_db()
+    return job
+
+
 def _directory_patient(request):
     """The directory patient named by ``request.data["person_id"]``, looked up as
     the requesting admin — or the error ``Response`` to return."""
@@ -51,7 +75,7 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [HasAnyRole]
 
     def get_permissions(self):
-        if self.action in ("verify", "unverify", "destroy", "geometry", "page_image", "extract_ad_hoc"):
+        if self.action in ("verify", "unverify", "destroy", "geometry", "page_image", "extract_ad_hoc", "classify"):
             return [IsReviewer()]
         if self.action == "patient":
             return [IsAdmin()]
@@ -182,10 +206,9 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         from apps.prompts.adhoc import AdHocSelectionError, ad_hoc_version
 
         doc = self.get_object()
-        if not hasattr(doc, "text"):
-            return Response({"detail": "Parse the document before extracting it."}, status=status.HTTP_409_CONFLICT)
-        if doc.jobs.filter(status__in=[JobStatus.QUEUED, JobStatus.RUNNING]).exists():
-            return Response({"detail": "This document is already being processed."}, status=status.HTTP_409_CONFLICT)
+        refusal = _busy_or_unparsed(doc)
+        if refusal:
+            return refusal
         try:
             version = ad_hoc_version(request.data.get("object_types"), user=request.user)
         except AdHocSelectionError as exc:
@@ -194,16 +217,26 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST)
 
         job = ExtractionJob.objects.create(document=doc, ad_hoc_version=version, requested_by=request.user)
-        try:
-            dispatch_extract(job.id)
-        except Exception:
-            logger.warning("pipeline: ad-hoc dispatch failed job=%s", job.id)  # safe code only, never PHI
-            job.status, job.stage, job.progress = JobStatus.FAILED, Stage.DONE, 1.0
-            job.errors = [{"code": "dispatch_failed"}]
-            job.finished_at = timezone.now()
-            job.save(update_fields=["status", "stage", "progress", "errors", "finished_at", "updated_at"])
-        job.refresh_from_db()
-        return Response(ExtractionJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+        return Response(ExtractionJobSerializer(_start(job)).data, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=True, methods=["post"])
+    def classify(self, request, pk=None):
+        """"Classify now" (reviewer): classify this parsed document and run the
+        extractors it routes to — for documents waiting in needs_classification
+        because auto-classify is off (PIPELINE_AUTO_CLASSIFY). Re-running replaces
+        the routed extractors' facts, so a verified document is refused (unverify
+        first). Returns the job (202) for polling."""
+        from apps.pipeline.serializers import ExtractionJobSerializer
+
+        doc = self.get_object()
+        refusal = _busy_or_unparsed(doc)
+        if refusal:
+            return refusal
+        if doc.verified_at is not None:
+            return Response({"detail": "Unverify the document before classifying it again."},
+                            status=status.HTTP_409_CONFLICT)
+        job = ExtractionJob.objects.create(document=doc, classify_requested=True, requested_by=request.user)
+        return Response(ExtractionJobSerializer(_start(job)).data, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=True, methods=["get"])
     def text(self, request, pk=None):

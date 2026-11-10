@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, Trash2, UploadCloud, UserRound } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, FileText, Loader2, Trash2, UploadCloud, UserRound, Wand2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -40,6 +40,7 @@ import {
   DOCUMENTS_PAGE_SIZE,
   isDocProcessing,
   type SourceDocument,
+  useClassifyDocument,
   useDeleteDocument,
   useDocuments,
   useUploadDocument,
@@ -264,6 +265,7 @@ export function InboxPage() {
 
   const docs = useDocuments(undefined, tab === "all" ? undefined : tab, page);
   const del = useDeleteDocument();
+  const classify = useClassifyDocument();
   const me = useMe();
   const roles = me.data?.roles ?? [];
   const canDelete = roles.some((r) => r === "reviewer" || r === "admin");
@@ -319,7 +321,7 @@ export function InboxPage() {
         </div>
 
         {/* column headers */}
-        <div className="mt-4 grid grid-cols-[1fr_8rem_10rem_1fr_17rem] gap-3 border-b px-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="mt-4 grid grid-cols-[1fr_8rem_10rem_1fr_22rem] gap-3 border-b px-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           <span>Document Name &amp; ID</span>
           <span>Date Added</span>
           <span>Status</span>
@@ -342,7 +344,7 @@ export function InboxPage() {
               return (
                 <div
                   key={d.id}
-                  className="grid cursor-pointer grid-cols-[1fr_8rem_10rem_1fr_17rem] items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
+                  className="grid cursor-pointer grid-cols-[1fr_8rem_10rem_1fr_22rem] items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
                   onClick={() => navigate(`/inbox/${d.id}`)}
                 >
                   <div className="flex min-w-0 items-center gap-3">
@@ -385,6 +387,23 @@ export function InboxPage() {
                     >
                       <Eye className="size-4" /> View
                     </Button>
+                    {canDelete && d.status === "needs_classification" && d.has_text && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-muted-foreground"
+                        title="Classify this document and run the extractors it routes to"
+                        disabled={isDocProcessing(d) || classify.isPending}
+                        onClick={() =>
+                          classify.mutate(d.id, {
+                            onSuccess: () => toast.info("Classifying…"),
+                            onError: (err) => toast.error(directoryErrorDetail(err) ?? "Could not classify"),
+                          })
+                        }
+                      >
+                        <Wand2 className="size-4" /> Classify
+                      </Button>
+                    )}
                     {canAssign && !d.verified && (
                       <Button
                         variant="ghost"

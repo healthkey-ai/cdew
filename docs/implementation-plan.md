@@ -460,7 +460,16 @@ concept ids.
   earlier ones, a re-run replaces only its own, and routed extractors' facts are untouched. The
   document's status is left as it is.
 - **Unclassified documents.** This works on documents waiting in `needs_classification`. Staging
-  doesn't auto-classify (`PIPELINE_AUTO_CLASSIFY=False`), so it is the reviewer's way to get facts.
+  doesn't auto-classify (`PIPELINE_AUTO_CLASSIFY=False`), so it is a reviewer's way to get facts.
+- **"Classify now"** is the routed counterpart.
+  - Reviewers call `POST /api/v1/documents/{id}/classify/`; the inbox row and the review panel
+    offer it as **Classify**.
+  - The job is marked `classify_requested`. `execute_pipeline` classifies the parsed document
+    without re-parsing it, then runs the extractors it routes to, whatever `PIPELINE_AUTO_CLASSIFY`
+    says.
+  - If nothing routes, the document stays in the queue.
+  - A verified document is refused, because a re-run replaces the routed extractors' facts; so is
+    one that is unparsed or busy.
 - **Disease fallback** (pick a disease when the patient has none) needs P2b's relevance, so it lands
   with P2b.
 
