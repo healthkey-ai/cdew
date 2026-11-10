@@ -2,7 +2,8 @@
 
 The UI's source of truth for progress; links to the Prefect flow run. Phase 2
 stages are ingest → parse → done; classify/extract stages arrive in Phase 3/4.
-An ad-hoc job (#114) skips parse/classify and runs one pinned transient version.
+An ad-hoc job (#114) skips parse/classify and runs one pinned transient version;
+a "Classify now" job skips parse and classifies regardless of auto-classify.
 """
 from django.conf import settings
 from django.db import models
@@ -46,6 +47,9 @@ class ExtractionJob(models.Model):
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
+    # "Classify now": a reviewer asked to classify (and extract) a parsed document,
+    # e.g. one waiting in needs_classification because auto-classify is off.
+    classify_requested = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

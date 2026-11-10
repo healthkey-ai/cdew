@@ -134,7 +134,10 @@ every attribute is provenance-bearing; async, parallel, idempotent processing.
 > **As built:** uploads **do not auto-classify by default** (`settings.PIPELINE_AUTO_CLASSIFY`, off) —
 > a document is ingested and parsed, then waits in the human-classification queue (status
 > `needs_classification`) for a reviewer to classify; classify → extract (stages 3–5) then run on that
-> trigger. Set the flag on to auto-run classify → extract on upload.
+> trigger. Set the flag on to auto-run classify → extract on upload. The trigger is **Classify** on the
+> inbox row or review panel (`POST /documents/{id}/classify/`, reviewer): it classifies the parsed text
+> (no re-parse) and runs the routed extractors. A reviewer can also extract chosen object types without
+> classifying (**Extract…**, ad-hoc, #114).
 
 ---
 

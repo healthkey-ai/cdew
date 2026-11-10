@@ -149,6 +149,19 @@ export function useUploadDocument() {
   });
 }
 
+/** "Classify now" (reviewer): classify a parsed document waiting in
+ * needs_classification and run the extractors it routes to. Returns the job. */
+export function useClassifyDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => (await api.post<{ id: number; status: string }>(`/documents/${id}/classify/`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["documents"] });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+}
+
 /** Delete a document (reviewer-gated). Cascades text/classification/extractions. */
 export function useDeleteDocument() {
   const qc = useQueryClient();
