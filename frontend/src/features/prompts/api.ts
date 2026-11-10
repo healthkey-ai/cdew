@@ -69,6 +69,8 @@ export interface PromptVersion {
    * published) the pinned definitions. Empty `object_types` = a legacy extractor. */
   object_types: string[];
   guidance: Record<string, string>;
+  /** Per-field "how it is extracted" overrides: {object type: {field: hint}}; others use the catalog's. */
+  field_guidance: Record<string, Record<string, string>>;
   object_type_snapshot: Record<string, ObjectType>;
   model: string;
   params: Record<string, unknown>;

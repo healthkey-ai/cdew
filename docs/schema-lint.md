@@ -190,6 +190,12 @@ instead, and so is a new version with neither.
 | `W170` | warn | `guidance` names an object type that isn't selected (it is ignored). |
 | `W171` | warn | A legacy `json_schema` extractor — select catalog object types instead. |
 | `W172` | warn | An object-typed version has prompt text; it is ignored (the prompt is composed). |
+| `E073` | error | `field_guidance` overrides a field the object type doesn't have. |
+| `W173` | warn | `field_guidance` holds hints for an object type that isn't selected (they are ignored). |
+
+A version may override the catalog's per-field "how it is extracted" hints with `field_guidance`
+(`{object type: {field: hint}}`). Only overrides are stored, so a blank hint means "use the catalog's".
+The overrides are versioned like the rest of the version.
 
 On **publish**, the selected object types' definitions are snapshotted onto the version
 (`object_type_snapshot`), so a later catalog sync only affects versions published after it.

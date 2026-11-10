@@ -166,7 +166,7 @@ def lint_prompt(prompt_text, kind):
     return findings
 
 
-def lint_object_types(object_types, guidance, catalog, prompt_text=""):
+def lint_object_types(object_types, guidance, catalog, prompt_text="", field_guidance=None):
     """An object-typed extractor (alignment §4.2, schema-lint §5a): a non-empty set of
     known catalog keys, and guidance only for those keys. The fields themselves are
     the catalog's (synced from promop), so there is no authored schema to lint.
@@ -199,19 +199,47 @@ def lint_object_types(object_types, guidance, catalog, prompt_text=""):
             findings.append(Finding("error", "E072", f"guidance.{key}", "guidance must be text"))
         elif key not in seen and text.strip():
             findings.append(Finding("warning", "W170", f"guidance.{key}", f"guidance for unselected object type '{key}' is ignored"))
+    findings += _lint_field_guidance(field_guidance, seen, catalog)
     if (prompt_text or "").strip():
         findings.append(Finding("warning", "W172", "prompt",
                                 "the extraction prompt is composed from the catalog; prompt text is ignored — use per-object guidance"))
     return findings
 
 
+def _lint_field_guidance(field_guidance, selected, catalog):
+    """Per-field hint overrides (``{object type: {field: text}}``) must name a
+    field the object type has (E073), be text (E072), and — to matter — belong
+    to a selected type (W173)."""
+    findings = []
+    if not field_guidance:
+        return findings
+    if not isinstance(field_guidance, dict):
+        return [Finding("error", "E072", "field_guidance", "field guidance must map object types to {field: text}")]
+    for key, hints in field_guidance.items():
+        if not isinstance(hints, dict):
+            findings.append(Finding("error", "E072", f"field_guidance.{key}", "must map fields to text"))
+            continue
+        fields = set((catalog.get(key) or {}).get("source_schema", {}).get("properties", {}))
+        for name, text in hints.items():
+            path = f"field_guidance.{key}.{name}"
+            if not isinstance(text, str):
+                findings.append(Finding("error", "E072", path, "a field hint must be text"))
+            elif key in catalog and name not in fields:
+                findings.append(Finding("error", "E073", path, f"'{key}' has no field '{name}'"))
+            elif key not in selected and text.strip():
+                findings.append(Finding("warning", "W173", path,
+                                        f"hint for unselected object type '{key}' is ignored"))
+    return findings
+
+
 def lint_version(kind, *, prompt_text="", json_schema=None, taxonomy=None, object_types=None, guidance=None,
-                 catalog=None, known_doc_types=None):
+                 catalog=None, known_doc_types=None, field_guidance=None):
     findings = list(lint_prompt(prompt_text, kind))
     if kind == "classifier":
         findings += lint_taxonomy(taxonomy or [], known_doc_types)
     elif object_types or not json_schema:
-        findings += lint_object_types(object_types or [], guidance or {}, catalog or {}, prompt_text)
+        findings += lint_object_types(object_types or [], guidance or {}, catalog or {}, prompt_text,
+                                      field_guidance or {})
     else:
         findings += lint_extractor_schema(json_schema or {})
         findings.append(Finding("warning", "W171", "data",

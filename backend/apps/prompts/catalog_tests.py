@@ -177,6 +177,18 @@ class ComposerTests(SimpleTestCase):
         with pytest.raises(NotImplementedError):
             compose_extraction_prompt([_definitions()["measurement"]], relevance={"concepts": []})
 
+    def test_field_hint_overrides_replace_the_catalog_hint(self):
+        d = _definitions()["measurement"]
+        prompt = compose_extraction_prompt(
+            [d], field_guidance={"measurement": {"measurement_date": "Use the collection date, not the report date.",
+                                                 "unit_source_value": "   "}})
+        assert "  - measurement_date (date, YYYY-MM-DD): Use the collection date, not the report date." in prompt
+        assert "Date the specimen was collected or the result reported" not in prompt
+        # a blank override keeps the catalog hint
+        assert "  - unit_source_value (string): The unit exactly as written" in prompt
+        # no overrides → the golden prompt, unchanged
+        assert compose_extraction_prompt([d], field_guidance={}) == GOLDEN_LABS
+
     def test_needs_a_definition(self):
         with pytest.raises(ValueError):
             compose_extraction_prompt([])

@@ -33,10 +33,12 @@ def _type_label(schema: dict) -> str:
     return base
 
 
-def _section(definition: dict, guidance: str) -> str:
+def _section(definition: dict, guidance: str, field_hints: dict | None = None) -> str:
     schema = definition["source_schema"]
     required = set(schema.get("required", []))
-    guide = definition.get("field_guide", {})
+    # The author's per-field overrides win over the catalog's hints.
+    guide = {**definition.get("field_guide", {}),
+             **{k: v.strip() for k, v in (field_hints or {}).items() if isinstance(v, str) and v.strip()}}
     lines = [f"## Object type: {definition['key']} — {definition['label']}"]
     if definition.get("description"):
         lines.append(definition["description"])
@@ -53,8 +55,12 @@ def _section(definition: dict, guidance: str) -> str:
     return "\n".join(lines)
 
 
-def compose_extraction_prompt(definitions: list[dict], guidance: dict | None = None, relevance=None) -> str:
+def compose_extraction_prompt(definitions: list[dict], guidance: dict | None = None, relevance=None,
+                              field_guidance: dict | None = None) -> str:
     """The system prompt for one extraction pass over ``definitions`` (in order).
+
+    ``field_guidance`` (``{object type: {field: hint}}``) overrides the catalog's
+    per-field "how it is extracted" hints for this extractor version.
 
     ``relevance`` is the seam for P2b (cdew#109): the patient's relevance set, which
     will add a per-object *priority* block. It must stay ``None`` until then — no
@@ -64,8 +70,8 @@ def compose_extraction_prompt(definitions: list[dict], guidance: dict | None = N
         raise NotImplementedError("relevance emphasis arrives with P2b (cdew#109)")
     if not definitions:
         raise ValueError("an object-typed extractor needs at least one object type definition")
-    guidance = guidance or {}
+    guidance, field_guidance = guidance or {}, field_guidance or {}
     parts = [SYSTEM]
-    parts += [_section(d, guidance.get(d["key"], "")) for d in definitions]
+    parts += [_section(d, guidance.get(d["key"], ""), field_guidance.get(d["key"])) for d in definitions]
     parts.append(CLOSING)
     return "\n\n".join(parts)

@@ -113,6 +113,7 @@ class PromptDefinitionViewSet(viewsets.ModelViewSet):
             # A draft extracts against the live catalog; publish snapshots it again.
             object_types=base.object_types if base else [],
             guidance=base.guidance if base else {},
+            field_guidance=base.field_guidance if base else {},
             model=base.model if base else "",  # "" → the deployment's LLM_MODEL
             params=base.params if base else {},
             created_by=request.user if request.user.is_authenticated else None,
@@ -175,6 +176,7 @@ class PromptVersionViewSet(
             taxonomy=version.taxonomy,
             object_types=version.object_types,
             guidance=version.guidance,
+            field_guidance=version.field_guidance,
             catalog={o.key: {**o.definition(), "commit_enabled": o.commit_enabled} for o in ObjectType.objects.all()},
             known_doc_types=set(DocumentType.objects.values_list("code", flat=True)),
         )

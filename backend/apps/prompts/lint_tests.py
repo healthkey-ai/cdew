@@ -79,6 +79,27 @@ class CommitContractLintTests(SimpleTestCase):
         assert lint_object_types(["drug"], {}, catalog) == []
 
 
+class FieldGuidanceLintTests(SimpleTestCase):
+    def lint(self, field_guidance, object_types=("measurement",)):
+        return lint_version("extractor", object_types=list(object_types), catalog=_catalog(),
+                            field_guidance=field_guidance)
+
+    def test_overrides_on_known_fields_are_clean(self):
+        assert self.lint({"measurement": {"measurement_date": "Collection date."}}).findings == []
+
+    def test_unknown_field_blocks_publish(self):
+        res = self.lint({"measurement": {"collected_on": "x"}})
+        assert not res.ok and _codes(res.findings) == {"E073"}
+
+    def test_hint_for_an_unselected_type_is_ignored_with_a_warning(self):
+        res = self.lint({"drug": {"drug_source_value": "As written."}})
+        assert res.ok and _codes(res.findings) == {"W173"}
+
+    def test_hints_must_be_text(self):
+        assert _codes(self.lint({"measurement": {"measurement_date": 5}}).findings) == {"E072"}
+        assert _codes(self.lint({"measurement": "x"}).findings) == {"E072"}
+
+
 class TaxonomyLintTests(SimpleTestCase):
     def test_bad_taxonomy(self):
         codes = {f.code for f in lint_taxonomy([{"type": "Lab Report", "threshold": 1.5}])}

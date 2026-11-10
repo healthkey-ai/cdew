@@ -233,7 +233,8 @@ def _extraction_system_prompt(version) -> str:
     if version.is_object_typed:
         from .compose import compose_extraction_prompt
 
-        composed = compose_extraction_prompt(version.object_type_definitions(), version.guidance)
+        composed = compose_extraction_prompt(version.object_type_definitions(), version.guidance,
+                                             field_guidance=getattr(version, "field_guidance", None))
         return f"{composed}\n\n{_PROVENANCE_INSTRUCTIONS}"
     return f"{version.prompt_text.strip()}\n\n{_PROVENANCE_INSTRUCTIONS}"
 

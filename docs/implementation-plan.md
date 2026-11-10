@@ -525,8 +525,10 @@ P2a and P2b should plug in without reworking P0–P2. Concretely:
 4. **Review order (P2):** today `review.py` returns records unordered. Add one explicit ordering
    function (object type, then position in the document). P2b swaps its primary key to relevance
    band without touching the views.
-5. **Guidance (P1):** the authoring UI labels per-object guidance as *extraction technique*. No
-   relevance or disease phrasing in examples or help text (alignment §7a.4).
+5. **Guidance (P1):** the authoring UI labels per-object guidance *Extraction prompt*. It is the
+   author's part of that object type's prompt section; renamed from "extraction technique" on
+   2026-11-10. Its help text still asks for *how* to extract, not which facts matter. No relevance or
+   disease phrasing in examples or help text (alignment §7a.4).
 6. **No pre-work needed** for run pinning, `concept_id` / resolution status on records, or the
    stale flag. Those are nullable additions in P2a/P2b, and cheap migrations.
 7. **Lookup context in the catalog (P0/P1).** The lookup uses unit, value and **specimen** to pick
