@@ -55,6 +55,7 @@ export function ExtractorsPage() {
   const [rows, setRows] = useState<AttrRow[]>([]);
   const [objectTypes, setObjectTypes] = useState<string[]>([]);
   const [guidance, setGuidance] = useState<Record<string, string>>({});
+  const [fieldGuidance, setFieldGuidance] = useState<Record<string, Record<string, string>>>({});
   const [convert, setConvert] = useState(false); // a legacy draft being moved onto object types
 
   useEffect(() => {
@@ -71,6 +72,7 @@ export function ExtractorsPage() {
     setRows(schemaToRows(selVersion.json_schema));
     setObjectTypes(selVersion.object_types ?? []);
     setGuidance(selVersion.guidance ?? {});
+    setFieldGuidance(selVersion.field_guidance ?? {});
     setConvert(false);
   }, [selVersion]);
 
@@ -96,6 +98,12 @@ export function ExtractorsPage() {
           json_schema: {},
           object_types: objectTypes,
           guidance: Object.fromEntries(objectTypes.filter((k) => guidance[k]?.trim()).map((k) => [k, guidance[k]])),
+          // only selected types' non-blank overrides; a blank hint means "use the catalog's"
+          field_guidance: Object.fromEntries(
+            objectTypes
+              .map((k) => [k, Object.fromEntries(Object.entries(fieldGuidance[k] ?? {}).filter(([, t]) => t.trim()))])
+              .filter(([, hints]) => Object.keys(hints).length),
+          ),
         }
       : { id: selVersion.id, prompt_text: prompt, model, json_schema: rowsToSchema(rows) };
     actions.saveDraft.mutate(body, {
@@ -112,7 +120,7 @@ export function ExtractorsPage() {
         <h1 className="text-xl font-semibold tracking-tight">Extractors</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Each extractor pulls facts of the object types you pick — measurements, conditions, drugs, procedures,
-          observations — whose fields come from promop. Add extraction guidance per type, then publish a new version.
+          observations — whose fields come from promop. Add an extraction prompt per type, then publish a new version.
         </p>
       </div>
 
@@ -202,6 +210,10 @@ export function ExtractorsPage() {
                   definitions={definitions}
                   selected={objectTypes}
                   guidance={guidance}
+                  fieldGuidance={fieldGuidance}
+                  onFieldHintChange={(k, field, text) =>
+                    setFieldGuidance((g) => ({ ...g, [k]: { ...(g[k] ?? {}), [field]: text } }))
+                  }
                   editable={isDraft}
                   onSelectedChange={setObjectTypes}
                   onGuidanceChange={(k, text) => setGuidance((g) => ({ ...g, [k]: text }))}

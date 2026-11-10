@@ -1,6 +1,6 @@
 import { type ComponentProps, Fragment, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ChevronRight, FlaskConical, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { ChevronRight, Loader2, Play, Plus, Save, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -542,7 +542,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
           onClick={() => extract()}
           disabled={!version || !samples.data?.length || dryRun.wholeSetRunning}
         >
-          {dryRun.wholeSetRunning ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+          {dryRun.wholeSetRunning ? <Loader2 className="animate-spin" /> : <Play />}
           {dryRun.wholeSetRunning ? "Extracting…" : "Extract"}
         </TipButton>
       </CardHeader>
@@ -718,7 +718,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                           disabled={!version || dryRun.isSampleRunning(s.id)}
                           onClick={() => extract([s.id])}
                         >
-                          {dryRun.isSampleRunning(s.id) ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+                          {dryRun.isSampleRunning(s.id) ? <Loader2 className="animate-spin" /> : <Play />}
                         </TipButton>
                         <TipButton
                           tip="Remove this document from the test set (does not delete the document)"

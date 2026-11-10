@@ -124,6 +124,9 @@ class PromptVersion(models.Model):
     # catalog; one without is a legacy json_schema extractor.
     object_types = models.JSONField(default=list)  # [catalog key, …] — one or many
     guidance = models.JSONField(default=dict)      # {key: extraction-technique guidance}
+    # Per-field hint overrides: {key: {field: "how it is extracted"}}. Only the
+    # overrides are stored; any other field uses the catalog's field_guide.
+    field_guidance = models.JSONField(default=dict)
     # Filled at publish: each targeted object type's definition (catalog.SNAPSHOT_FIELDS),
     # so a published version keeps running against the schemas it was tested on.
     object_type_snapshot = models.JSONField(default=dict)

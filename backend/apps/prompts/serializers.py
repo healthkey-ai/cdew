@@ -43,7 +43,7 @@ class PromptVersionSerializer(serializers.ModelSerializer):
         model = PromptVersion
         fields = (
             "id", "definition", "version", "status", "prompt_text", "json_schema",
-            "taxonomy", "object_types", "guidance", "object_type_snapshot",
+            "taxonomy", "object_types", "guidance", "field_guidance", "object_type_snapshot",
             "model", "params", "notes", "created_by", "created_at", "published_at",
         )
         read_only_fields = (
@@ -60,6 +60,15 @@ class PromptVersionSerializer(serializers.ModelSerializer):
         if not isinstance(value, dict):
             raise serializers.ValidationError("guidance must be an object of {object type: text}.")
         return value
+
+    def validate_field_guidance(self, value):
+        """``{object type: {field: hint}}``; blank hints are dropped (they mean
+        "use the catalog's hint"). Unknown fields are left to the lint (E073)."""
+        if not isinstance(value, dict) or not all(isinstance(h, dict) for h in value.values()):
+            raise serializers.ValidationError("field_guidance must be {object type: {field: text}}.")
+        cleaned = {key: {f: t.strip() for f, t in hints.items() if isinstance(t, str) and t.strip()}
+                   for key, hints in value.items()}
+        return {key: hints for key, hints in cleaned.items() if hints}
 
 
 class _ActiveVersionSerializer(serializers.ModelSerializer):

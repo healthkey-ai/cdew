@@ -379,6 +379,10 @@ draft (optionally cloning a version); `PATCH` a draft (blocked once published); 
 > `name / type / description / required / nullable` **attribute rows**. Either way the system owns
 > the `facts` / `provenance` envelope.
 >
+> **Per-field hints.** An extractor version can override a field's "how it is extracted" hint. On a
+> draft the hint is editable; the catalog's hint is the placeholder and can be reset. Overrides are
+> stored as `field_guidance` and composed into the prompt in place of the catalog's (schema-lint §5a).
+>
 > **Creating and routing extractors.**
 > - **+ Extractor** creates an extractor: key, name, description and the document types it runs on.
 >   It starts with an empty object-typed draft, and runs once a version is published.

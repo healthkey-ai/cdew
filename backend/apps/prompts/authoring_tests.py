@@ -85,6 +85,25 @@ class PromptAuthoringTests(APITestCase):
         assert "E070" in {f["code"] for f in self._publish(draft).json()["lint"]["findings"]}
         assert PromptVersion.objects.get(id=draft["id"]).status == "draft"
 
+    def test_field_hints_are_saved_cloned_and_composed(self):
+        from apps.prompts.agents import _extraction_system_prompt
+
+        draft = self._new_draft()
+        saved = self._patch(draft, field_guidance={
+            "measurement": {"measurement_date": "  Use the collection date.  ", "range_low": ""}})
+        assert saved["field_guidance"] == {"measurement": {"measurement_date": "Use the collection date."}}  # blanks dropped
+        assert self._publish(draft).status_code == 200
+        published = PromptVersion.objects.get(id=draft["id"])
+        assert "measurement_date (date, YYYY-MM-DD): Use the collection date." in _extraction_system_prompt(published)
+        # the next draft starts from them
+        assert self._new_draft()["field_guidance"] == saved["field_guidance"]
+
+    def test_hint_for_an_unknown_field_blocks_publish(self):
+        draft = self._new_draft()
+        self._patch(draft, field_guidance={"measurement": {"collected_on": "x"}})
+        r = self._publish(draft)
+        assert r.status_code == 400 and "E073" in {f["code"] for f in r.json()["lint"]["findings"]}
+
     def test_object_typed_lint_warnings(self):
         draft = self._new_draft()
         self._patch(draft, prompt_text="old free-form prompt", guidance={"drug": "include supportive meds"})
