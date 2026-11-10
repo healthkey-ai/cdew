@@ -58,8 +58,21 @@ export interface ObjectType {
   commit_required: string[];
   promop_required?: string[]; // promop's whole required list — the commit contract (P4)
   commit_enabled?: boolean; // this type's commit path is live (P5)
+  commit_adapter?: "bulk_upsert" | "genomics" | "none";
+  omop_targets?: string[];
+  commit_hold?: string; // why facts of this type can't be committed yet (e.g. genomics: promop#1245)
   promop_schema_version: string;
 }
+
+/** Reviewer-facing labels for fields whose API names mislead (genomics-integration.md). */
+export const FIELD_LABELS: Record<string, string> = {
+  allelic_frequency: "Sample VAF",
+  allelic_frequency_unit: "Sample VAF unit",
+  variant: "Transcript DNA change",
+  amino_acid_change: "Protein change",
+  interpretation: "Reported interpretation",
+  variant_analysis_method_type: "Analysis method",
+};
 
 /** Is this extractor version object-typed (vs a legacy json_schema one)? A new,
  * empty draft counts as object-typed — that's the only kind authors create now. */

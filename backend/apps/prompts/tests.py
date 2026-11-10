@@ -47,15 +47,17 @@ class ResolveTests(TestCase):
 
     def test_resolve_extractors_by_trigger(self):
         assert [e.key for e in resolve_extractors(["lab_results"])] == ["lab_report"]
-        # genetics_report extractor triggers on every genetics doc type + bone marrow
-        for t in ("fish", "cytogenetics", "ngs", "mrd", "gep", "bone_marrow"):
+        # genetics_report triggers on the genetics doc types + bone marrow; NGS has its
+        # own genomic-variant extractor (workstream G)
+        for t in ("fish", "cytogenetics", "mrd", "gep", "bone_marrow"):
             assert [e.key for e in resolve_extractors([t])] == ["genetics_report"], t
+        assert [e.key for e in resolve_extractors(["ngs"])] == ["ngs_report"]
         # a taxonomy type with no extractor (human-route) resolves to nothing
         assert resolve_extractors(["cytometry"]) == []
         assert resolve_extractors(["lab_report"]) == []  # the old slug no longer routes
 
     def test_resolve_extractors_union_dedup(self):
-        keys = {e.key for e in resolve_extractors(["lab_results", "fish", "ngs"])}
+        keys = {e.key for e in resolve_extractors(["lab_results", "fish", "mrd"])}
         assert keys == {"lab_report", "genetics_report"}
 
 

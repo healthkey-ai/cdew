@@ -48,6 +48,14 @@ class ObjectType(models.Model):
     # goes live (P5, #37). Then a promop-required field CDEW can't fill blocks
     # publishing an extractor that targets it (W101 → E110, schema-lint §5).
     commit_enabled = models.BooleanField(default=False)
+    # How a fact of this type reaches promop (alignment §3.4, §8): `bulk_upsert`
+    # (the per-type list POST), `genomics` (the per-patient genomics action, one
+    # parent Measurement + linked attributes) or `none` (staged in CDEW only).
+    commit_adapter = models.CharField(max_length=32, default="bulk_upsert")
+    omop_targets = models.JSONField(default=list)  # every OMOP table a fact lands in
+    # Why this type can't be committed yet — shown on its facts ("not committable
+    # yet"). Catalog availability is not write readiness (genomics-integration.md).
+    commit_hold = models.TextField(blank=True, default="")
 
     class Meta:
         db_table = "object_type"

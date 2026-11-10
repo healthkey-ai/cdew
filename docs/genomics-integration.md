@@ -1,7 +1,19 @@
 # NGS / PRomop Genomics integration contract
 
-Status: proposed design, 2026-09-11 (cdew#101); no runtime changes. Supplements
+Status: proposed design, 2026-09-11 (cdew#101). Supplements
 [alignment §3.4 and §10.3](promop-alignment.md#103-ngs-report--structured-finding-with-linked-attributes).
+
+**Extraction and staging built 2026-11-10** (workstream G).
+- **Pinned contract.** The 29 keys below are pinned in
+  `backend/apps/prompts/fixtures/promop_genomics_contract.json`, reviewed against promop
+  `30d561cf`.
+- **Object types.** `genomic_variant` is a catalog object type. The report context is
+  `genomic_report`, CDEW-only, and kept for no-variant reports. The proposed extensions are staged
+  as not-committed fields.
+- **Extractor.** NGS documents route to the `ngs_report` extractor.
+- **Commit** is still held for the whole finding (`commit_hold`, promop#1245).
+
+See `implementation-plan.md` → *G as built*.
 
 **Re-checked 2026-11-09 against PRomop `dev` @ `30d561cf`:**
 - **Genomics implementation delivered.** [#1179](https://github.com/healthkey-ai/promop/issues/1179),

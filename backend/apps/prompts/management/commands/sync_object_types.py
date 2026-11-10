@@ -21,7 +21,7 @@ from django.utils import timezone
 from apps.prompts import catalog
 from apps.prompts.models import DocumentType, ObjectType
 
-_COMPARED = (*catalog.SNAPSHOT_FIELDS, "sort_order")
+_COMPARED = (*catalog.SNAPSHOT_FIELDS, "sort_order", "commit_hold")  # never commit_enabled (CDEW-owned)
 
 
 class Command(BaseCommand):
@@ -38,7 +38,9 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         openapi = self._load(opts)
         try:
-            definitions = catalog.derive_object_types(openapi)
+            # promop's OpenAPI types, plus genomics from the reviewed contract fixture
+            # (not in OpenAPI; refreshed only by review — catalog.GENOMICS_FIXTURE).
+            definitions = catalog.derive_catalog(openapi, catalog.load_genomics_contract())
         except ValueError as exc:
             raise CommandError(str(exc)) from None
 

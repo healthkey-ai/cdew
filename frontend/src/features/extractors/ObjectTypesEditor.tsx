@@ -4,7 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import type { CatalogField, ObjectType } from "@/features/prompts/api";
+import { type CatalogField, FIELD_LABELS, type ObjectType } from "@/features/prompts/api";
 import { cn } from "@/lib/utils";
 
 const typeLabel = (f: CatalogField) => {
@@ -97,8 +97,19 @@ export function ObjectTypesEditor({
             <div className="flex flex-wrap items-baseline gap-2">
               <h3 className="text-sm font-semibold">{def.label}</h3>
               <span className="font-mono text-xs text-muted-foreground">{def.key}</span>
-              <span className="text-xs text-muted-foreground">→ promop {def.omop_target}</span>
+              <span className="text-xs text-muted-foreground">
+                {def.omop_targets?.length
+                  ? `→ promop ${def.omop_targets.join(" + ")}`
+                  : def.omop_target
+                    ? `→ promop ${def.omop_target}`
+                    : "→ stays in CDEW"}
+              </span>
             </div>
+            {def.commit_hold && (
+              <p className="rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+                Not committable yet: {def.commit_hold}
+              </p>
+            )}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -112,6 +123,9 @@ export function ObjectTypesEditor({
                   <TableRow key={name} className="align-top">
                     <TableCell className="font-mono text-xs">
                       {name}
+                      {FIELD_LABELS[name] && (
+                        <span className="block font-sans text-muted-foreground">{FIELD_LABELS[name]}</span>
+                      )}
                       <div className="mt-1 flex flex-wrap gap-1 font-sans">
                         {required.has(name) && <Badge variant="secondary">required</Badge>}
                         {!required.has(name) && commit.has(name) && (
@@ -120,8 +134,8 @@ export function ObjectTypesEditor({
                           </Badge>
                         )}
                         {extraOnly.has(name) && (
-                          <Badge variant="outline" title="Sent to promop's code lookup as context, never stored">
-                            lookup only
+                          <Badge variant="outline" title="Kept in CDEW (and, for specimen, sent to promop's code lookup as context); never written to promop">
+                            not committed
                           </Badge>
                         )}
                       </div>
