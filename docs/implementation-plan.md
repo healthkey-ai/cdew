@@ -336,7 +336,7 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 | **P2a** | **Term resolution at staging**: lookup per document, store concept + status per fact | #110 | P2, service token | **promop ready** |
 | **P2b** | Disease relevance: patient diseases → emphasis, pinning, ranking, signals | #109 (+ #103) | PL, P2a, scopes granted | **promop ready** |
 | **P5** | Commit: resolved facts → bulk upsert → `promop_ref`; commit UI | #110, #35 (rescope), #38 | PL, P2a, P4; BAA (#102) + an environment | After PL/P2a |
-| **G** | Genomics commit (variant object per cdew#101) | #101 (PR) | promop#348, #1245 | **Blocked on promop** |
+| **G** | Genomics: the `genomic_variant` object (extraction and staging) + the gated genomics adapter (commit). Contract: `docs/genomics-integration.md` | #101 (merged) | Extraction after P0/P1; commit needs promop#1245 | Extraction **ready after P1**; commit **blocked on promop** |
 
 **Order:**
 - **Now:** P0 → P1 → P2. D1 can be decided in parallel, since it is design work only.
@@ -521,10 +521,26 @@ lands, re-check at most daily per term.
 - Facts read back in promop with `DOCUMENT_EXTRACTION` provenance and the hospital.
 - Unresolved facts are held, not dropped.
 
-### G — Genomics commit  *(blocked on promop#348, #1245)*
-Extraction of variants works today. Committing them waits for promop's genomics receiver
-(promop#1245) and the origin decision (promop#348). Before G starts, review and rebase cdew#101,
-Adam's `genomic_variant` object for the NGS walkthrough, onto the current alignment doc.
+### G — Genomics  *(cdew#101 merged; contract: [`genomics-integration.md`](./genomics-integration.md))*
+**Extraction and staging** can follow P0/P1:
+1. **The object.** Add `genomic_variant` to the catalog as a logical object spanning measurement +
+   observation (alignment §3.4), from a **pinned, reviewed contract fixture**.
+2. **Rules:**
+   - one object per finding;
+   - DNA and protein changes kept separate;
+   - copy only stated values (no inferred origin, zygosity or negatives);
+   - **no-variant reports are kept as report context.**
+3. **Review UI.** Proposed report and assay extensions are staged with a visible "not yet
+   committable" state.
+
+**Commit** waits for the receiving gates in promop#1245: idempotent source-finding
+reconciliation, document provenance, explicit dates (promop's writer currently defaults a missing
+date to today), and a versioned action schema. Until then, **hold the whole finding**.
+- Retract through the genomics DELETE, so linked components go too.
+- **Acceptance tests** are listed in `genomics-integration.md`.
+- **Expert questions** (alignment 13.15) are settled before commit.
+
+promop#348 (origin via CRUD/FHIR) is no longer on CDEW's path.
 
 ### Issue housekeeping  *(done 2026-11-09)*
 - ✅ **#93 (epic):** rewritten with the current decisions (lookup + bulk upsert, `provision`,
