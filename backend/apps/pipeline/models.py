@@ -2,7 +2,9 @@
 
 The UI's source of truth for progress; links to the Prefect flow run. Phase 2
 stages are ingest → parse → done; classify/extract stages arrive in Phase 3/4.
+An ad-hoc job (#114) skips parse/classify and runs one pinned transient version.
 """
+from django.conf import settings
 from django.db import models
 
 from apps.documents.models import SourceDocument
@@ -35,6 +37,15 @@ class ExtractionJob(models.Model):
     # Stage-entry timeline for the pipeline-log UI (#28): [{"stage": "...", "at": iso}].
     # Stages + timestamps only — PHI-safe. A stage's duration = next entry's `at`.
     stage_history = models.JSONField(default=list)
+
+    # Ad-hoc extraction (#114, alignment §6.2): the transient version this job runs
+    # (on the system-owned `ad_hoc` definition) instead of routing, and who asked.
+    ad_hoc_version = models.ForeignKey(
+        "prompts.PromptVersion", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

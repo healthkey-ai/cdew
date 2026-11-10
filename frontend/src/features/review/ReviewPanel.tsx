@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, FileText, Image as ImageIcon, Loader2, Plus, X } from "lucide-react";
+import { Check, FileText, Image as ImageIcon, Loader2, Plus, Sparkles, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ import { type ObjectType, useObjectTypes } from "@/features/prompts/api";
 import { isJobActive, useJobs } from "@/features/workflow/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { AdHocExtractDialog } from "./AdHocExtractDialog";
 import { useReviewActions } from "./api";
 
 /** Fetch a page image as an authed blob → object URL (an <img src> can't send the
@@ -412,6 +413,7 @@ export function ReviewPanel({ docId }: { docId: number }) {
   const byKey = useMemo(() => Object.fromEntries((catalog.data ?? []).map((o) => [o.key, o])), [catalog.data]);
 
   const [addOpen, setAddOpen] = useState(false);
+  const [adHocOpen, setAdHocOpen] = useState(false);
   const [newSnippet, setNewSnippet] = useState("");
   const [newType, setNewType] = useState("measurement");
   const [newFields, setNewFields] = useState<Record<string, string>>({});
@@ -502,9 +504,21 @@ export function ReviewPanel({ docId }: { docId: number }) {
           <div className="flex min-h-0 flex-col gap-3">
             <div className="flex shrink-0 items-center justify-between">
               <h3 className="text-sm font-semibold">Facts{facts.data ? ` (${facts.data.length})` : ""}</h3>
-              <Button variant="outline" size="sm" className="h-8" onClick={openAdd}>
-                <Plus className="size-4" /> Add fact
-              </Button>
+              <div className="flex gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={extracting}
+                  title="Pick object types and extract this document"
+                  onClick={() => setAdHocOpen(true)}
+                >
+                  <Sparkles className="size-4" /> Extract…
+                </Button>
+                <Button variant="outline" size="sm" className="h-8" onClick={openAdd}>
+                  <Plus className="size-4" /> Add fact
+                </Button>
+              </div>
             </div>
             <ul className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
               {facts.data?.map((f) => (
@@ -590,6 +604,14 @@ export function ReviewPanel({ docId }: { docId: number }) {
             )}
           </div>
         </div>
+
+        <AdHocExtractDialog
+          open={adHocOpen}
+          onOpenChange={setAdHocOpen}
+          catalog={catalog.data}
+          running={actions.extractAdHoc.isPending}
+          onRun={(types) => actions.extractAdHoc.mutateAsync(types)}
+        />
 
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogContent>

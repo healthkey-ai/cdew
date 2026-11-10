@@ -36,6 +36,12 @@ class DirectRunner:
 
         return extract_document(context)
 
+    def extract_version(self, context, version) -> int:
+        """Run one pinned version, not the routed set (ad-hoc, #114)."""
+        from .extract import run_extractor
+
+        return len(run_extractor(context, version.definition, version))
+
 
 def _stamp(job: ExtractionJob, stage: str) -> None:
     """Append a stage-entry timestamp to the job's timeline (PHI-safe, #28)."""
@@ -46,6 +52,8 @@ def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
     runner = runner or DirectRunner()
     job = ExtractionJob.objects.select_related("document").get(id=job_id)
     doc = job.document
+    if job.ad_hoc_version_id:
+        return _execute_ad_hoc(job, doc, runner)
 
     job.status = JobStatus.RUNNING
     job.stage = Stage.PARSE
@@ -106,6 +114,32 @@ def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
             logger.warning("pipeline: extract crashed job=%s", job.id)
             return _finish(job, JobStatus.FAILED, errors=[{"code": "extract_error"}])
 
+    return _finish(job, JobStatus.COMPLETED)
+
+
+def _execute_ad_hoc(job: ExtractionJob, doc, runner) -> ExtractionJob:
+    """An ad-hoc job (#114): extract the already-parsed document with the job's
+    pinned transient version — no parse, no classify, no routing. The document's
+    status is left as it is; the facts join its review queue."""
+    from apps.prompts.models import PromptVersion
+
+    from .extract import ExtractionContext
+
+    job.status = JobStatus.RUNNING
+    job.stage = Stage.EXTRACT
+    job.progress = 0.5
+    job.started_at = timezone.now()
+    _stamp(job, Stage.EXTRACT)
+    job.save(update_fields=["status", "stage", "progress", "started_at", "stage_history", "updated_at"])
+
+    if not hasattr(doc, "text"):
+        return _finish(job, JobStatus.FAILED, errors=[{"code": "not_parsed"}])
+    version = PromptVersion.objects.select_related("definition").get(id=job.ad_hoc_version_id)
+    try:
+        runner.extract_version(ExtractionContext(document=doc), version)
+    except Exception:
+        logger.warning("pipeline: ad-hoc extract crashed job=%s", job.id)  # safe code only, never PHI
+        return _finish(job, JobStatus.FAILED, errors=[{"code": "extract_error"}])
     return _finish(job, JobStatus.COMPLETED)
 
 

@@ -39,7 +39,8 @@ def classify_task(doc_id: int) -> list[str]:
 
 
 @task(name="extract-one", tags={GEMINI_TAG}, retries=_RETRIES, retry_delay_seconds=_RETRY_DELAY)
-def extract_one_task(doc_id: int, definition_id: int) -> int:
+def extract_one_task(doc_id: int, definition_id: int, version_id: int | None = None) -> int:
+    """Run one extractor: its active version, or a pinned ``version_id`` (ad-hoc, #114)."""
     from apps.documents.models import SourceDocument
     from apps.prompts.models import PromptDefinition
 
@@ -48,7 +49,7 @@ def extract_one_task(doc_id: int, definition_id: int) -> int:
     try:
         doc = SourceDocument.objects.get(id=doc_id)
         definition = PromptDefinition.objects.select_related("active_version").get(id=definition_id)
-        version = definition.active_version
+        version = definition.versions.get(id=version_id) if version_id else definition.active_version
         if version is None:
             return 0
         # Tasks take ids (Prefect serializes arguments); P2b passes its pinned
@@ -88,6 +89,9 @@ class PrefectRunner:
         definitions = [d for d in resolve_extractors(context.routed_types) if d.active_version_id]
         futures = [extract_one_task.submit(context.document.id, d.id) for d in definitions]
         return sum(f.result() for f in futures)
+
+    def extract_version(self, context, version) -> int:
+        return extract_one_task(context.document.id, version.definition_id, version.id)
 
 
 class DryRunPrefectRunner:

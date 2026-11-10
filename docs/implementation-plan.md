@@ -332,7 +332,7 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 | **P1** | Object types on the extractor version, publish-time snapshots; migrate `lab_report` / `genetics_report` (+ test samples) | #95 | P0 | ✅ **Built** |
 | **P2** | Prompt composer + tagged-union output; `ExtractionRecord.object_type`; the seams below | #96 | P1 | ✅ **Built** |
 | **P3 / P4** | Taxonomy from promop `doc_type`; lint REGISTRY → synced schemas (absorbs #37's commit gate) | #97, #98, #37 | P0 | ✅ **Built** (see *P3/P4 as built*) |
-| **Ad-hoc** | Per-document object selection on a transient version | #114 | P2 | Ready after P2 |
+| **Ad-hoc** | Per-document object selection on a transient version | #114 | P2 | ✅ **Built** (disease fallback waits for P2b) |
 | **PL** | Patient link: `patient_ref → person_id` via `persons/provision`, at route time | #113 | D1, promop service token | After D1 |
 | **P2a** | **Term resolution at staging**: lookup per document, store concept + status per fact | #110 | P2, service token | **promop ready** |
 | **P2b** | Disease relevance: patient diseases → emphasis, pinning, ranking, signals | #109 (+ #103) | PL, P2a, scopes granted | **promop ready** |
@@ -341,7 +341,7 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 
 **Order:**
 - **Done:** P0 → P1 → P2. D1 can be decided in parallel, since it is design work only.
-- **Then:** P3, P4 (done) and ad-hoc.
+- **Then:** P3, P4 and ad-hoc (all done).
 - **Then:** PL → P2a → P2b → P5.
 - **Last:** G, once promop#348 and #1245 land.
 
@@ -440,6 +440,29 @@ concept ids.
   Django admin when P5 makes the type's commit path live.
 - **Sync** prints the same gap.
 - Today promop's requirements are fully covered, so nothing fires.
+
+### Ad-hoc as built  *(2026-11-10, #114)*
+- **Who and how.** Reviewers call `POST /api/v1/documents/{id}/extract-ad-hoc/ {object_types}`.
+  The review panel offers it as **Extract…**.
+  - The selection is checked with the object-type lint.
+  - The document must be parsed and not already processing (409 otherwise).
+- **The version.** The run is a normal `ExtractionJob` with `ad_hoc_version` (and `requested_by`)
+  pinned to a transient published version.
+  - That version belongs to the system-owned `ad_hoc` definition. The definition is `enabled=False`
+    so it is never routed, and is hidden from the authoring API.
+  - The version snapshots the catalog and has no guidance, so the composer uses each type's
+    `default_guidance`.
+- **Reuse.** An identical selection reuses its version while the catalog is unchanged.
+- **Job state.** `execute_pipeline` branches on `ad_hoc_version` (no parse or classify), so job
+  state stays in `service.py`. The local, thread and deployment paths are unchanged; the Prefect
+  runner calls `extract-one` with the pinned version id.
+- **Idempotency** is per `(document, version)` for ad-hoc runs. A different pick adds facts beside
+  earlier ones, a re-run replaces only its own, and routed extractors' facts are untouched. The
+  document's status is left as it is.
+- **Unclassified documents.** This works on documents waiting in `needs_classification`. Staging
+  doesn't auto-classify (`PIPELINE_AUTO_CLASSIFY=False`), so it is the reviewer's way to get facts.
+- **Disease fallback** (pick a disease when the patient has none) needs P2b's relevance, so it lands
+  with P2b.
 
 ### Seams P0–P2 must leave for P2a / P2b
 P2a and P2b should plug in without reworking P0–P2. Concretely:

@@ -17,7 +17,7 @@ _TERMINAL = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
 class JobViewSet(viewsets.ReadOnlyModelViewSet):
     """Job status for UI polling. Filter by ?document=<id>."""
 
-    queryset = ExtractionJob.objects.select_related("document").order_by("-created_at")
+    queryset = ExtractionJob.objects.select_related("document", "ad_hoc_version").order_by("-created_at")
     serializer_class = ExtractionJobSerializer
     permission_classes = [HasAnyRole]
 

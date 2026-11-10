@@ -33,6 +33,16 @@ export function useReviewActions(docId: number) {
       mutationFn: async (f: NewFact) => (await api.post("/extractions/", f)).data,
       onSuccess: invalidate,
     }),
+    /** Ad-hoc extraction (#114): extract this document for the picked object types.
+     * Returns the job; the panel refreshes its facts when the job finishes. */
+    extractAdHoc: useMutation({
+      mutationFn: async (objectTypes: string[]) =>
+        (await api.post(`/documents/${docId}/extract-ad-hoc/`, { object_types: objectTypes })).data,
+      onSuccess: () => {
+        invalidate();
+        qc.invalidateQueries({ queryKey: ["jobs"] });
+      },
+    }),
     verify: useMutation({
       mutationFn: async () => (await api.post(`/documents/${docId}/verify/`, {})).data,
       onSuccess: invalidate,
