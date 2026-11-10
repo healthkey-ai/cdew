@@ -1,11 +1,9 @@
 """Identity + local role grants (hybrid auth, design §11).
 
-Identity follows the house OIDC pattern (issuer, sub). Role grants are LOCAL to
-this service: sign-in/identity may come from hk-identity, but who is a reviewer
-vs prompt-author vs admin is decided here.
-
-TODO(auth): replace the vendored Identity with the shared `hk-identity` package
-model once it is wired as a dependency; keep RoleAssignment local.
+Identity follows the house OIDC pattern (issuer, sub). Sign-in may come from a
+partner identity host (promop, phr, Firebase — ``partner_auth``) or a local
+account, but role grants are LOCAL to this service: who is a reviewer vs
+prompt-author vs admin is decided here.
 """
 import uuid
 
@@ -18,8 +16,44 @@ from django.utils import timezone
 class IdentityManager(BaseUserManager):
     use_in_migrations = True
 
-    def get_or_create_from_claims(self, issuer, sub, **defaults):
-        return self.get_or_create(issuer=issuer, sub=sub, defaults=defaults)
+    def get_by_natural_key(self, *key):
+        """Resolve ``(issuer, sub)``, or a bare ``sub`` at login.
+
+        ``sub`` is unique only within its issuer (hk-labs #59), and only
+        ``urn:local`` identities have usable passwords, so a bare username
+        (what ModelBackend passes) is looked up among local identities.
+        """
+        if len(key) == 2:
+            issuer, sub = key
+            return self.get(issuer=issuer, sub=sub)
+        (username,) = key
+        return self.get(issuer="urn:local", sub=username)
+
+    def get_or_create_from_claims(self, claims):
+        """Get or auto-provision the Identity for verified ``TokenClaims``.
+
+        Email and name are captured on first sign-in and refreshed on later ones.
+        Returns ``(identity, created)``. No roles are granted here.
+        """
+        identity, created = self.get_or_create(
+            issuer=claims.issuer,
+            sub=claims.sub,
+            defaults={"email": claims.email or "", "name": claims.name or ""},
+        )
+        if created:
+            identity.set_unusable_password()
+            identity.save(update_fields=["password"])
+            return identity, True
+        updates = []
+        if claims.email and identity.email != claims.email:
+            identity.email = claims.email
+            updates.append("email")
+        if claims.name and identity.name != claims.name:
+            identity.name = claims.name
+            updates.append("name")
+        if updates:
+            identity.save(update_fields=updates)
+        return identity, False
 
     def _create_user(self, email, password, **extra_fields):
         if not email:
@@ -47,11 +81,15 @@ class IdentityManager(BaseUserManager):
 
 
 class Identity(AbstractBaseUser, PermissionsMixin):
-    """OIDC identity keyed on (issuer, sub). External identities (Firebase)
-    store no credentials locally; local identities (urn:local) use email+password."""
+    """OIDC identity keyed on (issuer, sub). External identities (promop, phr,
+    Firebase) store no credentials locally; local identities (urn:local) use
+    email+password."""
 
     issuer = models.CharField(max_length=255)
-    sub = models.CharField(max_length=255, unique=True)
+    # NOT globally unique: a `sub` is unique only within its issuer, enforced by
+    # the composite (issuer, sub) constraint below. A global unique 500s the first
+    # sign-in of a second issuer's subject with the same `sub` (hk-labs #59).
+    sub = models.CharField(max_length=255)
 
     email = models.EmailField(blank=True, default="")
     name = models.CharField(max_length=255, blank=True, default="")
@@ -76,6 +114,10 @@ class Identity(AbstractBaseUser, PermissionsMixin):
                 name="uq_identity_local_email",
             ),
         ]
+
+    def natural_key(self):
+        # (issuer, sub), not AbstractBaseUser's (sub,): `sub` alone no longer names one row.
+        return (self.issuer, self.sub)
 
     @property
     def is_local(self) -> bool:

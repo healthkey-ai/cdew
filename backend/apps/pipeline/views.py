@@ -3,7 +3,7 @@ import logging
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from apps.accounts.permissions import HasAnyRole
 from rest_framework.response import Response
 
 from .models import ExtractionJob, JobStatus, Stage
@@ -19,7 +19,7 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
 
     queryset = ExtractionJob.objects.select_related("document").order_by("-created_at")
     serializer_class = ExtractionJobSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasAnyRole]
 
     def get_queryset(self):
         qs = super().get_queryset()

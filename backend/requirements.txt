@@ -18,8 +18,10 @@ prefect>=3.0,<4.0                     # per-document flow; self-hosted on GCP (s
 # ── LLM (Phase 3) ── gemini via Pydantic AI; model-agnostic, typed structured output
 pydantic-ai-slim[google]>=0.0.14
 
-# ── Auth ──
-firebase-admin>=6.5,<7.0             # Firebase ID-token verification (partner auth, when SSO wired)
+# ── Auth ── partner sign-in via promop, phr or Firebase (design §11, #31)
+firebase-admin>=6.5,<7.0             # Firebase ID-token verification (org-owned Firebase)
+PyJWT[crypto]>=2.8,<3                # RS256 verification of promop/phr family tokens via JWKS
+httpx>=0.27,<1                       # JWKS fetch + server-side sign-in to promop/phr
 
 # ── Test / tooling ──
 pytest==8.1.1

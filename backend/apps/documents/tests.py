@@ -28,7 +28,11 @@ def _xlsx_bytes() -> bytes:
 
 class DocumentUploadTests(APITestCase):
     def setUp(self):
+        from apps.accounts.models import Role, RoleAssignment
+
         self.identity = Identity.objects.create(issuer="urn:local", sub="u1", email="cdm@x.org")
+        # CDM staff: any CDEW role opens document data (design §11; role-less → 403).
+        RoleAssignment.objects.create(identity=self.identity, role=Role.REVIEWER)
         token = RefreshToken.for_user(self.identity).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
@@ -137,14 +141,16 @@ class DocumentDeleteTests(APITestCase):
 
         self.reviewer = Identity.objects.create(issuer="urn:local", sub="rev", email="rev@x.org")
         RoleAssignment.objects.create(identity=self.reviewer, role=Role.REVIEWER)
+        # Staff without the reviewer role (can upload, can't delete).
         self.plain = Identity.objects.create(issuer="urn:local", sub="plain", email="plain@x.org")
+        RoleAssignment.objects.create(identity=self.plain, role=Role.PROMPT_AUTHOR)
 
     def _auth(self, identity):
         token = RefreshToken.for_user(identity).access_token
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
     def _make_doc(self):
-        self._auth(self.plain)  # upload only needs auth, not the reviewer role
+        self._auth(self.plain)  # upload needs a CDEW role, not specifically reviewer
         f = SimpleUploadedFile("labs.txt", b"Hemoglobin 9.1 g/dL", content_type="text/plain")
         r = self.client.post("/api/v1/documents/", {"file": f, "patient_ref": "P9"}, format="multipart")
         assert r.status_code == 201, r.content

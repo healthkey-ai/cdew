@@ -5,6 +5,7 @@
 export const KEYS = {
   health: ["health"] as const,
   me: ["me"] as const,
+  authConfig: ["auth", "config"] as const,
   users: ["users"] as const,
   documents: (patientRef?: string, status?: string) =>
     ["documents", patientRef ?? "all", status ?? "any"] as const,

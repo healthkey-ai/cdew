@@ -10,6 +10,9 @@ export interface AdminUser {
   id: number;
   email: string;
   name: string;
+  /** `urn:local` for CDEW-local accounts, else the partner identity host's issuer. */
+  issuer: string;
+  is_local: boolean;
   is_active: boolean;
   is_staff: boolean;
   roles: string[];

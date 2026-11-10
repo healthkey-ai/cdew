@@ -3,10 +3,9 @@ import logging
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.accounts.permissions import IsReviewer
+from apps.accounts.permissions import HasAnyRole, IsReviewer
 from apps.pipeline.dispatch import dispatch_extract, dispatch_geometry
 from apps.pipeline.models import ExtractionJob, JobStatus, Stage
 
@@ -28,7 +27,7 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
 
     queryset = SourceDocument.objects.all().order_by("-created_at")
     serializer_class = SourceDocumentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasAnyRole]
 
     def get_permissions(self):
         if self.action in ("verify", "unverify", "destroy", "geometry", "page_image"):

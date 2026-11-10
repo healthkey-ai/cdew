@@ -261,21 +261,45 @@ PREFECT_TASK_RETRY_DELAY_SECONDS = env.int("PREFECT_TASK_RETRY_DELAY_SECONDS", d
 # classification/extraction. Set True to auto-run classify → extract on upload.
 PIPELINE_AUTO_CLASSIFY = env.bool("PIPELINE_AUTO_CLASSIFY", default=False)
 
-# ── Pluggable partner auth providers (hybrid auth, design §11) ──────────────
-# PartnerAuthentication iterates these in order; first to recognise the bearer
-# token wins. Empty by default → JWT-only (bootable offline). A Firebase
-# provider (hk-identity) is added when host-app SSO is wired.
+# ── Partner auth: staff sign-in via promop, phr or Firebase (design §11, #31) ──
+# PartnerAuthentication iterates these in order; the first provider that
+# recognises the bearer token wins. Empty by default → local JWT only, so the
+# service boots and tests run offline. Enable with, e.g.:
+#   PARTNER_AUTH_PROVIDERS=apps.accounts.providers.jwks.JwksTokenProvider,apps.accounts.providers.firebase.FirebaseTokenProvider
 PARTNER_AUTH_PROVIDERS = env.list("PARTNER_AUTH_PROVIDERS", default=[])
+# Trusted JWKS issuers (promop family auth, phr installations), a JSON list of
+#   {"key", "label", "issuer", "jwks_url", "login_url"?, "audience"?}
+# `login_url` (the host's family-auth `login/`) puts a sign-in option on CDEW's
+# login page; without it the issuer is only accepted via token exchange.
+PARTNER_AUTH_ISSUERS = env.json("PARTNER_AUTH_ISSUERS", default=[])
+PARTNER_AUTH_CACHE_TTL = env.int("PARTNER_AUTH_CACHE_TTL", default=60)
+PARTNER_AUTH_JWKS_CACHE_TTL = env.int("PARTNER_AUTH_JWKS_CACHE_TTL", default=3600)
+PARTNER_AUTH_LOGIN_TIMEOUT = env.int("PARTNER_AUTH_LOGIN_TIMEOUT", default=10)
+# Org-owned Firebase (FirebaseTokenProvider). FIREBASE_WEB_CONFIG is the public
+# web config ({apiKey, authDomain, projectId, …}) the login page uses for Google
+# sign-in; the service account (if any) is FIREBASE_CREDENTIALS_JSON.
+FIREBASE_PROJECT_ID = env("FIREBASE_PROJECT_ID", default="")
+FIREBASE_CREDENTIALS_JSON = env("FIREBASE_CREDENTIALS_JSON", default="")
+FIREBASE_SKIP_REVOCATION_CHECK = env.bool("FIREBASE_SKIP_REVOCATION_CHECK", default=False)
+FIREBASE_WEB_CONFIG = env.json("FIREBASE_WEB_CONFIG", default={})
+
+# Identity.sub is unique per issuer only (composite constraint), which auth.E003
+# assumes is global; the manager resolves bare-`sub` logins among urn:local.
+SILENCED_SYSTEM_CHECKS = ["auth.E003"]
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "apps.accounts.partner_auth.PartnerAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    # Signed in is not enough: partner sign-in auto-provisions role-less identities
+    # (any promop/phr/Firebase account holder), so data needs a CDEW role (§11).
+    "DEFAULT_PERMISSION_CLASSES": ("apps.accounts.permissions.HasAnyRole",),
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+    # Sign-in endpoints (local login, partner-login, partner-token) — per client.
+    "DEFAULT_THROTTLE_RATES": {"auth": env("AUTH_THROTTLE_RATE", default="30/min")},
 }
 
 SIMPLE_JWT = {

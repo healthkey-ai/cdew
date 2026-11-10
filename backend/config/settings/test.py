@@ -28,3 +28,9 @@ DOCAI_OCR_FN = "apps.documents.geometry.testing.fake_ocr"
 # upload by default. Tests that need auto-classify use @override_settings.
 PREFECT_DISPATCH = "local"
 PIPELINE_AUTO_CLASSIFY = False
+
+# Partner auth off by default (tests enable it with @override_settings); a high
+# sign-in throttle so the suite's many logins never trip it.
+PARTNER_AUTH_PROVIDERS = []
+PARTNER_AUTH_ISSUERS = []
+REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_RATES": {"auth": "100000/min"}}  # noqa: F405

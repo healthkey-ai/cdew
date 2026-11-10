@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "@/components/AppLayout";
-import { RequireAuth, RequireRole } from "@/components/RequireAuth";
+import { RequireAnyRole, RequireAuth, RequireRole } from "@/components/RequireAuth";
 import { useAuth } from "@/features/auth/api";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { DocumentViewPage } from "@/features/documents/DocumentViewPage";
@@ -21,8 +21,9 @@ export default function App() {
     <Routes>
       <Route path="/login" element={authed ? <Navigate to="/inbox" replace /> : <LoginPage />} />
 
-      {/* Authed app shell */}
+      {/* Authed app shell — signed in AND holding a CDEW role */}
       <Route element={<RequireAuth />}>
+        <Route element={<RequireAnyRole />}>
         <Route element={<AppLayout />}>
           <Route index element={<Navigate to="/inbox" replace />} />
           <Route path="/inbox" element={<InboxPage />} />
@@ -44,6 +45,7 @@ export default function App() {
           </Route>
 
           <Route path="*" element={<Navigate to="/inbox" replace />} />
+        </Route>
         </Route>
       </Route>
 

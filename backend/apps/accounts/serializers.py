@@ -15,13 +15,18 @@ class IdentitySerializer(serializers.ModelSerializer):
 
 
 class AdminUserSerializer(serializers.ModelSerializer):
-    """Read view of a local identity for the admin Users screen (design §11)."""
+    """Read view of an identity for the admin Users screen (design §11).
+
+    ``issuer`` says where the account lives: ``urn:local`` for CDEW-local
+    accounts, otherwise the partner identity host it signed in through.
+    """
 
     roles = serializers.ListField(child=serializers.CharField(), read_only=True)
+    is_local = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Identity
-        fields = ("id", "email", "name", "is_active", "is_staff", "roles", "created_at")
+        fields = ("id", "email", "name", "issuer", "is_local", "is_active", "is_staff", "roles", "created_at")
         read_only_fields = fields
 
 
