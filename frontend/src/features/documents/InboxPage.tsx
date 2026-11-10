@@ -97,6 +97,9 @@ function UploadHero({
   const jobStatus = job.data?.status;
   const canPick = Boolean(directory?.host && directory.connected);
   const picking = canPick && !manual;
+  // A document always belongs to a patient: no upload until one is chosen.
+  const hasPatient = picking ? patient !== null : patientRef.trim() !== "";
+  const needPatient = picking ? "Pick a patient first" : "Enter a patient ref first";
 
   useEffect(() => {
     if (jobStatus === "completed") {
@@ -110,8 +113,8 @@ function UploadHero({
 
   const doUpload = (file?: File | null) => {
     if (!file) return;
-    if (picking ? !patient : !patientRef.trim()) {
-      toast.error(picking ? "Pick a patient first" : "Enter a patient ref first");
+    if (!hasPatient) {
+      toast.error(needPatient);
       return;
     }
     upload.mutate(
@@ -132,7 +135,7 @@ function UploadHero({
     <div
       onDragOver={(e) => {
         e.preventDefault();
-        setDragging(true);
+        setDragging(hasPatient); // no drop highlight until a patient is chosen
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
@@ -161,10 +164,15 @@ function UploadHero({
       </p>
 
       <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-        <Button onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
+        <Button
+          onClick={() => fileRef.current?.click()}
+          disabled={upload.isPending || !hasPatient}
+          title={hasPatient ? undefined : needPatient}
+        >
           {upload.isPending ? "Uploading…" : "Select File"}
         </Button>
       </div>
+      {!hasPatient && <p className="mt-2 text-xs text-muted-foreground">{needPatient}, then select or drop a file.</p>}
 
       {picking ? (
         <div className="mx-auto mt-4 flex max-w-lg items-center justify-center gap-2">
@@ -257,7 +265,7 @@ function AssignPatientDialog({ doc, onClose }: { doc: SourceDocument | null; onC
 /** Inbox (design §3): upload a document, browse recent activity, open one to review. */
 export function InboxPage() {
   const navigate = useNavigate();
-  const [patientRef, setPatientRef] = useState("PT-001");
+  const [patientRef, setPatientRef] = useState(""); // no default: every upload names its real patient
   const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
   const [toDelete, setToDelete] = useState<SourceDocument | null>(null);
