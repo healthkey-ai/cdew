@@ -14,6 +14,8 @@ Stand up the standalone repo matching house conventions so later phases only add
   `docker-compose.yml`. DRF defaults: JWT auth, `IsAuthenticated`, `JSONRenderer`, page size 50.
 - **Auth:** depend on `hk-identity` (`AUTH_USER_MODEL` = its `Identity`; Firebase → JWT); **local role
   table** (reviewer / prompt-author / admin) + permission gates + a role-admin UI stub (hybrid, design §11).
+  *(Superseded 2026-11-09: SSO is via promop family-auth tokens, not Firebase. See #31 and
+  design §11.)*
 - **Frontend:** Vite + React 19 + TS, Tailwind v4, shadcn/ui, react-query v5, axios instance with
   JWT interceptor + 401-refresh retry, `KEYS` query-key factory, Vite proxy to `/api`.
 - **Storage:** `STORAGES` precedence GCS → S3 → local, private ACLs, signed URLs.
@@ -310,22 +312,27 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
   `qualifier_concept`.
 - **A genomics receiver** with idempotent import: promop#1245 is open.
   - Together these block committing genomic findings, not extracting them.
+- **Family auth for CDEW** ([promop#2405](https://github.com/healthkey-ai/promop/issues/2405)).
+  Add CDEW's audience; settle the `org` claim, which the phr and promop docs disagree on; name the
+  patient-search endpoint for the D1 picker (alignment §2.7).
 - **Field metadata for prompts** (new, small ask). cdew#103 wants each relevance concept's value
   kind, unit, allowed values, and whether promop computes it. The relevance response doesn't carry
-  them, and promop's `writable-fields` descriptor sits behind patient-record permissions. Ask: add
-  those to the relevance concepts, or let `system/*.read` read the deployment-level descriptor.
+  them, and promop's `writable-fields` descriptor sits behind patient-record permissions. Asked in
+  [promop#2404](https://github.com/healthkey-ai/promop/issues/2404): add those to the relevance
+  concepts, or let `system/*.read` read the deployment-level descriptor.
 
 ### Workstreams and order
 
 | # | Workstream | CDEW issue | Depends on | Status |
 |---|---|---|---|---|
-| **D1** | **Patient identity design.** Where the patient's email, organization and source hospital come from: upload form, a CDEW patient record, or FHIR metadata (Phase 8). CDEW stores only a free-form `patient_ref` today. | *to file* | — | **Decide now**; blocks PL, P2b, P5 |
+| **D1** | **Patient identity design.** Three routes per alignment §2.7: PHR uploads take `person_id` from the patient's family token; staff link existing patients via a promop picker using their own sign-in; new patients via `provision`. The source hospital comes with the document. Decides the model, the migration of `patient_ref`, and the picker UX. | #112 | #31 (family-token sign-in), promop#2405 | **Decide now**; blocks PL, P2b, P5 |
+| **Auth** | **CDEW sign-in with promop accounts:** a family-token provider in `PartnerAuthentication`; local roles; drop Firebase | #31 | promop#2405 (audience) | **Ready**, independent of the extraction work |
 | **P0** | `ObjectType` catalog + `sync_object_types` (OpenAPI → source schemas; `promop_endpoint`, not `fhir_resource`) | #94 | — | **Ready** |
 | **P1** | `PromptDefinition.object_types`, `PromptVersion` snapshots; migrate `lab_report` / `genetics_report` (+ test samples) | #95 | P0 | **Ready** |
 | **P2** | Prompt composer + tagged-union output; `ExtractionRecord.object_type`; the seams below | #96 | P1 | **Ready** |
 | **P3 / P4** | Taxonomy from promop `doc_type`; lint REGISTRY → synced schemas (absorbs #37's commit gate) | #97, #98, #37 | P0 | **Ready** |
-| **Ad-hoc** | Per-document object selection on a transient version | *to file* | P2 | Ready after P2 |
-| **PL** | Patient link: `patient_ref → person_id` via `persons/provision`, at route time | *to file* | D1, promop service token | After D1 |
+| **Ad-hoc** | Per-document object selection on a transient version | #114 | P2 | Ready after P2 |
+| **PL** | Patient link: `patient_ref → person_id` via `persons/provision`, at route time | #113 | D1, promop service token | After D1 |
 | **P2a** | **Term resolution at staging**: lookup per document, store concept + status per fact | #110 | P2, service token | **promop ready** |
 | **P2b** | Disease relevance: patient diseases → emphasis, pinning, ranking, signals | #109 (+ #103) | PL, P2a, scopes granted | **promop ready** |
 | **P5** | Commit: resolved facts → bulk upsert → `promop_ref`; commit UI | #110, #35 (rescope), #38 | PL, P2a, P4; BAA (#102) + an environment | After PL/P2a |
@@ -425,8 +432,10 @@ P2a and P2b should plug in without reworking P0–P2. Concretely:
 
 **Open item for promop:** promop counts a *Seen* sighting each time an unresolved term is looked
 up (#2125). Terms from documents have no per-patient rows, so the count stays provisional and keeps
-growing. CDEW re-checking the same fact would inflate the counts curators use to prioritise. **Ask
-for a non-counting re-check mode**, e.g. `count: false`. Until then, re-check at most daily per term.
+growing. CDEW re-checking the same fact would inflate the counts curators use to prioritise. **Asked
+for a non-counting re-check mode** in
+[promop#2403](https://github.com/healthkey-ai/promop/issues/2403), e.g. `count: false`. Until it
+lands, re-check at most daily per term.
 
 **Exit:**
 - Staged facts carry a concept or a resolution state.
@@ -517,15 +526,23 @@ Extraction of variants works today. Committing them waits for promop's genomics 
 (promop#1245) and the origin decision (promop#348). Before G starts, review and rebase cdew#101,
 Adam's `genomic_variant` object for the NGS walkthrough, onto the current alignment doc.
 
-### Issue housekeeping  *(do with the first PR of this phase)*
-- **#93 (epic):** rewrite its decisions. FHIR bundle → lookup + bulk upsert; OIDC → `provision`.
-  Add D1, PL, P2a, P2b and G.
-- **#94:** `fhir_resource` → `promop_endpoint`; drop the catalog relevance block; add `specimen`.
-- **#35:** rescope from "FHIR connector" to "P5 bulk-upsert write path", or close it into #110.
-- **#103:** comment that profiles come from `relevance/` per patient (P2b). Keep it open only for
-  the field-metadata ask.
-- **File:** D1 (patient identity design), PL (patient link), ad-hoc extraction, and the promop
-  asks: field metadata, non-counting lookup re-check.
+### Issue housekeeping  *(done 2026-11-09)*
+- ✅ **#93 (epic):** rewritten with the current decisions (lookup + bulk upsert, `provision`,
+  per-run relevance, service scopes) and a checklist of every workstream issue.
+- ✅ **#94:** update appended: `promop_endpoint`, no catalog relevance, extraction-only `specimen`.
+- ✅ **#35:** rescoped to the **P5 bulk-upsert write path**; the original FHIR-connector scope is
+  kept, collapsed.
+- ✅ **#103:** commented. Profiles come from `relevance/` per patient (folded into #109); it stays
+  open for per-field metadata (promop#2404).
+- ✅ **#109, #110:** labeled, given milestones, and linked to the plan. #37 and #38 commented with
+  their new scope.
+- ✅ **Filed in CDEW:**
+  - #112, D1 patient identity design;
+  - #113, PL patient link;
+  - #114, ad-hoc extraction.
+- ✅ **Filed in promop (assigned to Adam):**
+  - promop#2403, a non-counting lookup re-check;
+  - promop#2404, field metadata for relevance concepts.
 
 ## Phase 8 — FHIR-sync source  *(later)*
 
