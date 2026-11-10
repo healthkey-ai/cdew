@@ -493,6 +493,10 @@ while not forcing the LLM to invent dates.
   promop's current API keys (all 29 match promop's genomics catalog, re-checked 2026-11-09) from
   proposed report and assay extensions.
 - **No-variant reports.** Preserve report context even when **no variants are detected**.
+- *Built (extraction and staging, 2026-11-10):* `genomic_variant` comes from a pinned, reviewed
+  contract fixture. Report context is the CDEW-only `genomic_report`. NGS documents route to an
+  `ngs_report` extractor. Commit is held on promop#1245 (`commit_hold`). See
+  `implementation-plan.md` → *G as built*.
 
 ---
 

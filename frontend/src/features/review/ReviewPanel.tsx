@@ -27,7 +27,7 @@ import {
   useGeometry,
   useTriggerGeometry,
 } from "@/features/documents/api";
-import { type ObjectType, useObjectTypes } from "@/features/prompts/api";
+import { FIELD_LABELS, type ObjectType, useObjectTypes } from "@/features/prompts/api";
 import { isJobActive, useJobs } from "@/features/workflow/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -217,7 +217,8 @@ function coerceByCatalog(ot: ObjectType, raw: Record<string, string>): Record<st
   for (const [k, v] of Object.entries(raw)) {
     if (v.trim() === "") continue;
     const t = fieldType(ot, k);
-    out[k] = (t === "number" || t === "integer") && !Number.isNaN(Number(v)) ? Number(v) : v;
+    if (t === "boolean" && (v === "true" || v === "false")) out[k] = v === "true";
+    else out[k] = (t === "number" || t === "integer") && !Number.isNaN(Number(v)) ? Number(v) : v;
   }
   return out;
 }
@@ -333,8 +334,12 @@ function FactCard({
         {Object.keys(draft).length === 0 && <p className="text-xs text-muted-foreground">No fields.</p>}
         {Object.entries(draft).map(([key, value]) => (
           <div key={key} className="grid grid-cols-[7.5rem_1fr] items-center gap-2">
-            <Label htmlFor={`f${fact.id}-${key}`} className="truncate text-[11px] font-normal text-muted-foreground">
-              {key}
+            <Label
+              htmlFor={`f${fact.id}-${key}`}
+              title={objectType?.field_guide[key] ? `${key} — ${objectType.field_guide[key]}` : key}
+              className="truncate text-[11px] font-normal text-muted-foreground"
+            >
+              {(objectType && FIELD_LABELS[key]) || key}
             </Label>
             <Input
               id={`f${fact.id}-${key}`}
@@ -344,7 +349,11 @@ function FactCard({
             />
           </div>
         ))}
-        {missingForCommit.length > 0 && (
+        {objectType?.commit_hold ? (
+          <p className="text-[11px] text-muted-foreground" title={objectType.commit_hold}>
+            Not committable yet — staged in CDEW. {objectType.commit_hold}
+          </p>
+        ) : missingForCommit.length > 0 && (
           <p className="text-[11px] text-warning">
             Needed to commit to promop: <span className="font-mono">{missingForCommit.join(", ")}</span>
           </p>

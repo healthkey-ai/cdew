@@ -337,7 +337,7 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 | **P2a** | **Term resolution at staging**: lookup per document, store concept + status per fact | #110 | P2, service token | **promop ready** |
 | **P2b** | Disease relevance: patient diseases → emphasis, pinning, ranking, signals | #109 (+ #103) | PL, P2a, scopes granted | **promop ready** |
 | **P5** | Commit: resolved facts → bulk upsert → `promop_ref`; commit UI | #110, #35 (rescope), #38 | PL, P2a, P4; BAA (#102) + an environment | After PL/P2a |
-| **G** | Genomics: the `genomic_variant` object (extraction and staging) + the gated genomics adapter (commit). Contract: `docs/genomics-integration.md` | #101 (merged) | Extraction after P0/P1; commit needs promop#1245 | Extraction **ready after P1**; commit **blocked on promop** |
+| **G** | Genomics: the `genomic_variant` object (extraction and staging) + the gated genomics adapter (commit). Contract: `docs/genomics-integration.md` | #101 (merged) | Extraction after P0/P1; commit needs promop#1245 | Extraction ✅ **built** (see *G as built*); commit **blocked on promop** |
 
 **Order:**
 - **Done:** P0 → P1 → P2. D1 can be decided in parallel, since it is design work only.
@@ -472,6 +472,38 @@ concept ids.
     one that is unparsed or busy.
 - **Disease fallback** (pick a disease when the patient has none) needs P2b's relevance, so it lands
   with P2b.
+
+### G as built — extraction and staging  *(2026-11-10)*
+- **Contract, not OpenAPI.** promop doesn't publish its genomics action in OpenAPI, so
+  `genomic_variant` is derived from a **reviewed, pinned contract fixture**
+  (`prompts/fixtures/promop_genomics_contract.json`).
+  - It holds the 29 keys promop's genomics catalog and writer accept, with the `assessment` and
+    VAF-unit vocabularies from its validation, captured at promop `30d561cf`.
+  - It changes only by review; `sync_object_types` reads it but never fetches it.
+- **`genomic_variant`.**
+  - Only `gene` is required.
+  - DNA and protein changes are separate fields.
+  - The proposed variant extensions are staged as never-committed fields: alleles, coordinates,
+    external IDs, read depth / alternate reads, copy number, fusion partners, breakpoints.
+  - `commit_adapter: genomics`; `omop_targets: [measurement, observation]`.
+  - `commit_hold` names promop#1245; the review UI shows "not committable yet".
+- **`genomic_report`** (CDEW-only, `commit_adapter: none`) holds the shared report context: assay,
+  genes tested, specimen, limits and overall result. It is kept even when no variant is detected,
+  and holds gene-less structural findings instead of an invented gene.
+- **New fields on `ObjectType`:** `commit_adapter`, `omop_targets` and `commit_hold`.
+  - The composer lists enum vocabularies.
+  - The review UI uses the contract's labels: Sample VAF, Transcript DNA change, Protein change,
+    Reported interpretation, Analysis method.
+- **Migration 0013.**
+  - Publishes an `ngs_report` extractor over `[genomic_variant, genomic_report, measurement]`,
+    triggered on `ngs`.
+  - `measurement` covers assay biomarkers such as TMB, MSI and HRD, via guidance.
+  - `genetics_report` no longer triggers on `ngs`, so variants aren't also extracted as plain
+    measurements.
+  - FISH, cytogenetics, MRD and GEP stay on `genetics_report` (measurement). A gene-less
+    cytogenetic finding has no `genomic_variant` home yet.
+- **Commit** remains held for the whole finding until promop#1245's gates pass. P5 must skip
+  `commit_adapter != bulk_upsert`.
 
 ### Seams P0–P2 must leave for P2a / P2b
 P2a and P2b should plug in without reworking P0–P2. Concretely:

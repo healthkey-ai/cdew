@@ -27,6 +27,9 @@ def _type_label(schema: dict) -> str:
     base = next((x for x in t if x != "null"), "string") if isinstance(t, list) else (t or "string")
     if schema.get("format") == "date":
         return "date, YYYY-MM-DD"
+    values = [v for v in schema.get("enum") or [] if v is not None]
+    if values:
+        return "one of: " + ", ".join(values)
     return base
 
 

@@ -99,9 +99,10 @@ class SyncCommandTests(TestCase):
         return out.getvalue()
 
     def test_seeded_by_migration_and_idempotent(self):
-        assert list(ObjectType.objects.values_list("key", flat=True)) == list(EXPECTED_FIELDS)
+        keys = [*EXPECTED_FIELDS, "genomic_variant", "genomic_report"]
+        assert list(ObjectType.objects.values_list("key", flat=True)) == keys
         out = self.sync("--fixture")
-        assert all(f"= {k}" in out for k in EXPECTED_FIELDS)
+        assert all(f"= {k}" in out for k in keys), out
 
     def test_changes_are_applied_and_reported(self):
         ObjectType.objects.filter(key="drug").update(label="stale", source_schema={})

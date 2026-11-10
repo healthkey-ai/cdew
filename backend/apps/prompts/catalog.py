@@ -274,5 +274,233 @@ def unguided_fields(definitions: list[dict]) -> dict[str, list[str]]:
 SNAPSHOT_FIELDS = (
     "key", "label", "description", "omop_target", "promop_endpoint", "source_schema",
     "field_guide", "default_guidance", "extraction_only", "commit_required", "promop_required",
-    "promop_schema_version",
+    "promop_schema_version", "omop_targets", "commit_adapter",
 )
+
+
+# ── Genomics (workstream G, cdew#101; docs/genomics-integration.md) ──────────
+# promop doesn't publish its genomics action in OpenAPI, and OpenAPI omission is
+# not permission: `genomic_variant` comes from a reviewed, pinned contract
+# fixture instead. Catalog availability is not write readiness — `commit_hold`
+# keeps committing off until promop#1245's receiving gates exist.
+
+GENOMICS_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "promop_genomics_contract.json"
+
+GENOMICS_HOLD = (
+    "Committing genomic findings waits on promop#1245: idempotent source-finding import, document "
+    "provenance, explicit dates and a versioned schema (docs/genomics-integration.md)."
+)
+
+GENOMIC_VARIANT = {
+    "label": "Genomic variant",
+    "description": "One reported genomic finding — a gene variant, structural change or fusion — with its "
+                   "attributes: DNA and protein change, VAF, origin, interpretation, assay and specimen.",
+    "omop_target": "measurement",
+    "omop_targets": ["measurement", "observation"],  # promop's parent Measurement + linked attributes
+    "commit_adapter": "genomics",
+    "primary": "gene",
+    "default_guidance": (
+        "One fact per reported finding: a gene can have several variants, and the same variant in two "
+        "specimens is two facts. Keep the DNA change and the protein change separate, each exactly as "
+        "written; never compute one from the other. Copy only stated values: never infer zygosity, origin, "
+        "a negative result or a date."
+    ),
+    "field_guide": {
+        "gene": "The gene symbol exactly as written (e.g. 'TP53'). If a structural finding names no gene, "
+                "record it in the report context instead; never supply a gene.",
+        "variant_name": "A short variant name as written (e.g. 'V600E', 'exon 19 deletion').",
+        "variant": "The transcript DNA change as written (HGVS c., e.g. 'c.1799T>A'), or the variant as the "
+                   "report gives it.",
+        "variant_description": "The full verbatim description of the finding, however long.",
+        "genome_assembly": "The genome build as written (e.g. 'GRCh38', 'hg19').",
+        "transcript_reference_sequence_id": "The transcript accession with its version (e.g. 'NM_004333.6').",
+        "genomic_reference_sequence_id": "The genomic reference accession with its version (e.g. 'NC_000007.14').",
+        "genomic_dna_change": "The genomic DNA change as written (HGVS g.).",
+        "amino_acid_change": "The protein change as written (HGVS p., e.g. 'p.Val600Glu'); never derived from "
+                             "the DNA change.",
+        "chromosome": "The chromosome as written (e.g. '17', 'X').",
+        "cytogenetic_location": "The cytogenetic band as written (e.g. '17p13.1').",
+        "variant_category": "The kind of finding as written (e.g. 'SNV', 'deletion', 'fusion', 'copy number gain').",
+        "zygosity": "Zygosity only when stated (e.g. 'heterozygous'); never inferred from VAF.",
+        "origin": "Origin as written (e.g. 'somatic', 'germline'); never inferred.",
+        "genomic_source_class": "The genomic source class, when stated separately from origin.",
+        "assessment": "As the report states it: present, absent, not_tested, no_call or indeterminate. A blank "
+                      "or missing row is not 'absent'.",
+        "allelic_frequency": "The sample variant allele frequency (VAF) exactly as stated, not a population "
+                             "frequency. 0 is a real value.",
+        "allelic_frequency_unit": "'%' when the VAF is a percentage (0-100), '1' when it is a fraction (0-1).",
+        "interpretation": "The reported interpretation as written (e.g. 'Pathogenic', 'Tier I'). Pathogenicity "
+                          "is not actionability.",
+        "classification_framework": "The framework named for the interpretation, with its version "
+                                    "(e.g. 'ACMG/AMP 2015').",
+        "interpretation_date": "The date of the interpretation, if stated separately.",
+        "evidence_source": "Evidence cited for the interpretation, as written.",
+        "test_date": "The date the test was performed, if stated; never the upload or report date instead.",
+        "variant_analysis_method_type": "The analysis method as written (e.g. 'NGS', 'Sanger sequencing').",
+        "specimen_id": "The specimen identifier as written.",
+        "specimen_type": "The specimen type as written (e.g. 'bone marrow aspirate', 'FFPE tumor').",
+        "collection_date": "The specimen collection date, if stated.",
+        "report_id": "The report or accession number as written.",
+        "laboratory": "The performing laboratory as written.",
+        "reference_allele": "The reference allele as written.",
+        "alternate_allele": "The alternate allele as written.",
+        "genomic_coordinates": "Genomic coordinates as written, with their convention "
+                               "(e.g. 'chr7:140753336, GRCh38').",
+        "external_variant_ids": "External variant identifiers as written (e.g. 'rs113488022', a COSMIC id).",
+        "read_depth": "Total read depth at the position, if stated.",
+        "alternate_read_count": "Reads supporting the variant, if stated.",
+        "copy_number": "The copy number, if stated.",
+        "fusion_partners": "For a fusion, the partner genes as written (e.g. 'BCR::ABL1').",
+        "breakpoints": "Fusion or structural breakpoints as written.",
+    },
+    # Proposed report-level variant extensions (genomics-integration.md): staged in
+    # CDEW with provenance and shown as not committable; promop accepts none yet.
+    "extraction_only": {
+        "reference_allele": {"type": ["string", "null"]},
+        "alternate_allele": {"type": ["string", "null"]},
+        "genomic_coordinates": {"type": ["string", "null"]},
+        "external_variant_ids": {"type": ["string", "null"]},
+        "read_depth": {"type": ["integer", "null"]},
+        "alternate_read_count": {"type": ["integer", "null"]},
+        "copy_number": {"type": ["number", "null"]},
+        "fusion_partners": {"type": ["string", "null"]},
+        "breakpoints": {"type": ["string", "null"]},
+    },
+}
+
+# CDEW-only: shared report context, kept even when no variant is detected
+# (genomics-integration.md, "Report context"). promop has no report/assay
+# resource yet, so it is never committed.
+GENOMIC_REPORT = {
+    "key": "genomic_report",
+    "label": "Genomic report context",
+    "description": "The report a genomic test came from: assay, genes tested, specimen and overall result — "
+                   "including a no-variant result.",
+    "primary": "assay_name",
+    "commit_hold": "Report context stays in CDEW: promop has no genomic report or assay resource yet "
+                   "(docs/genomics-integration.md).",
+    "default_guidance": (
+        "One fact per report: its assay, specimen and overall result, including when no variants were "
+        "detected. A negative result covers only the genes tested and the stated limits."
+    ),
+    "properties": {
+        "assay_name": ("string", "The test or panel name as written (e.g. 'Myeloid NGS Panel v3')."),
+        "panel_version": ("string", "The panel or assay version, if stated."),
+        "genes_tested": ("string", "The genes or regions the report says were tested, as written."),
+        "result_summary": ("string", "The report's overall result as written (e.g. 'No pathogenic variants "
+                                     "detected')."),
+        "no_variants_detected": ("boolean", "True only when the report states that no variants were detected."),
+        "report_id": ("string", "The report or accession number as written."),
+        "report_status": ("string", "The report status as written (e.g. 'final', 'amended')."),
+        "issued_date": ("date", "The date the report was issued, if stated."),
+        "laboratory": ("string", "The performing laboratory as written."),
+        "specimen_id": ("string", "The specimen identifier as written."),
+        "specimen_type": ("string", "The specimen type as written."),
+        "collection_date": ("date", "The specimen collection date, if stated."),
+        "tumor_content": ("string", "Tumor content or purity as written (e.g. '40%')."),
+        "detection_limits": ("string", "Stated detection limits or sensitivity, as written."),
+        "coverage": ("string", "Stated sequencing coverage, as written."),
+        "limitations": ("string", "Stated assay limitations, as written."),
+        "unattributed_findings": ("string", "Findings stated without a gene (e.g. a structural change), as "
+                                            "written — kept here rather than given an invented gene."),
+    },
+}
+
+
+def load_genomics_contract() -> dict:
+    with GENOMICS_FIXTURE.open() as fh:
+        return json.load(fh)
+
+
+def _contract_field(spec: dict) -> dict:
+    kind = spec.get("value_kind", "string")
+    schema = {"type": "number" if kind == "number" else "string"}
+    if spec.get("format") == "date":
+        schema["format"] = "date"
+    if spec.get("enum"):
+        schema["enum"] = list(spec["enum"])
+    return schema
+
+
+def _nullable(schema: dict) -> dict:
+    out = {**schema, "type": [schema["type"], "null"]}
+    if "enum" in out:
+        out["enum"] = [*out["enum"], None]
+    return out
+
+
+def derive_contract_types(contract: dict, start: int = 0) -> list[dict]:
+    """`genomic_variant`, from the reviewed genomics receiving contract."""
+    spec, guide = GENOMIC_VARIANT, GENOMIC_VARIANT["field_guide"]
+    fields = contract.get("fields") or {}
+    if spec["primary"] not in fields:
+        raise ValueError(f"the genomics contract has no {spec['primary']}")
+    props = {}
+    for name in [spec["primary"], *(k for k in guide if k in fields), *sorted(fields)]:
+        if name in props:
+            continue
+        schema = _contract_field(fields[name])
+        props[name] = schema if name == spec["primary"] else _nullable(schema)
+    for name, schema in spec["extraction_only"].items():
+        props[name] = dict(schema)
+    for name, schema in props.items():
+        if guide.get(name):
+            schema["description"] = guide[name]
+    required = list(contract.get("required") or [spec["primary"]])
+    return [{
+        "key": "genomic_variant",
+        "label": spec["label"],
+        "description": spec["description"],
+        "omop_target": spec["omop_target"],
+        "omop_targets": list(spec["omop_targets"]),
+        "commit_adapter": spec["commit_adapter"],
+        "commit_hold": GENOMICS_HOLD,
+        "promop_endpoint": contract.get("endpoint", ""),
+        "source_schema": {"type": "object", "additionalProperties": False, "properties": props,
+                          "required": [spec["primary"]]},
+        "field_guide": {k: v for k, v in guide.items() if k in props},
+        "default_guidance": spec["default_guidance"],
+        "extraction_only": sorted(spec["extraction_only"]),
+        "commit_required": sorted(required),
+        "promop_required": sorted(required),
+        "promop_schema_version": _fingerprint({"fields": fields, "required": required}),
+        "sort_order": start,
+    }]
+
+
+def cdew_only_types(start: int = 0) -> list[dict]:
+    """`genomic_report` — staged in CDEW, never committed."""
+    spec = GENOMIC_REPORT
+    props = {}
+    for name, (kind, hint) in spec["properties"].items():
+        schema = {"type": "boolean"} if kind == "boolean" else {"type": "string"}
+        if kind == "date":
+            schema["format"] = "date"
+        props[name] = {**(schema if name == spec["primary"] else _nullable(schema)), "description": hint}
+    return [{
+        "key": spec["key"],
+        "label": spec["label"],
+        "description": spec["description"],
+        "omop_target": "",
+        "omop_targets": [],
+        "commit_adapter": "none",
+        "commit_hold": spec["commit_hold"],
+        "promop_endpoint": "",
+        "source_schema": {"type": "object", "additionalProperties": False, "properties": props,
+                          "required": [spec["primary"]]},
+        "field_guide": {k: hint for k, (_, hint) in spec["properties"].items()},
+        "default_guidance": spec["default_guidance"],
+        "extraction_only": sorted(props),  # all of it stays in CDEW
+        "commit_required": [],
+        "promop_required": [],
+        "promop_schema_version": "",
+        "sort_order": start,
+    }]
+
+
+def derive_catalog(openapi: dict, genomics_contract: dict) -> list[dict]:
+    """The whole catalog: promop's OpenAPI-derived types, then the genomics types."""
+    base = derive_object_types(openapi)
+    for d in base:
+        d.update(omop_targets=[d["omop_target"]], commit_adapter="bulk_upsert", commit_hold="")
+    return [*base, *derive_contract_types(genomics_contract, len(base)), *cdew_only_types(len(base) + 1)]

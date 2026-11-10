@@ -24,7 +24,7 @@ class ObjectTypeSerializer(serializers.ModelSerializer):
         fields = (
             "key", "label", "description", "omop_target", "promop_endpoint", "source_schema",
             "field_guide", "default_guidance", "extraction_only", "commit_required", "promop_required",
-            "commit_enabled", "promop_schema_version", "synced_at",
+            "commit_enabled", "commit_adapter", "omop_targets", "commit_hold", "promop_schema_version", "synced_at",
         )
         read_only_fields = fields
 

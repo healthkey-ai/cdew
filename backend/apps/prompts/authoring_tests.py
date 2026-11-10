@@ -118,7 +118,8 @@ class PromptAuthoringTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(reviewer).access_token}")
         r = self.client.get("/api/v1/prompts/object-types/")
         assert r.status_code == 200
-        assert [o["key"] for o in r.json()] == ["measurement", "condition", "drug", "procedure", "observation"]
+        assert [o["key"] for o in r.json()] == ["measurement", "condition", "drug", "procedure", "observation",
+                                                "genomic_variant", "genomic_report"]
         assert "specimen" in r.json()[0]["source_schema"]["properties"]
 
     def test_published_version_is_immutable(self):

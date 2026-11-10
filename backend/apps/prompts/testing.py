@@ -43,7 +43,8 @@ def canned_facts(version, text, *, model=None, document=None) -> list[dict]:
     Object-typed versions get tagged ``measurement`` facts; legacy versions get
     the old json_schema payloads."""
     if getattr(version, "is_object_typed", False):
-        return _canned_measurements(version, text) + _canned_observations(version, text)
+        return (_canned_measurements(version, text) + _canned_observations(version, text)
+                + _canned_genomics(version, text))
     key = version.definition.key
     facts: list[dict] = []
     if key == "lab_report":
@@ -74,6 +75,40 @@ def canned_facts(version, text, *, model=None, document=None) -> list[dict]:
 
 
 _SMOKING_RE = re.compile(r"(former|current|never) smoker[^.\n]*", re.IGNORECASE)
+# "TP53 c.743G>A (p.Arg248Gln) VAF 34%" — gene, DNA change, optional protein change and VAF.
+_VARIANT_RE = re.compile(
+    r"\b([A-Z][A-Z0-9]{1,7}) (c\.[^\s(]+)(?: \((p\.[^)]+)\))?(?:[^\n]*?VAF (\d+(?:\.\d+)?)\s*(%)?)?")
+_PANEL_RE = re.compile(r"[^\n]*\bpanel\b[^\n]*", re.IGNORECASE)
+_NO_VARIANTS_RE = re.compile(r"no (?:pathogenic )?variants (?:were )?detected[^.\n]*", re.IGNORECASE)
+
+
+def _prov(m, group=0):
+    return {"page": 0, "char_start": m.start(group), "char_end": m.end(group), "snippet": m.group(group),
+            "confidence": 0.9}
+
+
+def _canned_genomics(version, text) -> list[dict]:
+    """NGS findings (workstream G): one genomic_variant per stated variant — DNA and
+    protein changes kept separate, VAF only when stated — and one genomic_report
+    for the report context, kept even when no variant was detected."""
+    facts: list[dict] = []
+    if "genomic_variant" in version.object_types:
+        for m in _VARIANT_RE.finditer(text):
+            data = {"gene": m.group(1), "variant": m.group(2), "amino_acid_change": m.group(3),
+                    "assessment": "present"}
+            if m.group(4) is not None:
+                data["allelic_frequency"] = float(m.group(4))
+                data["allelic_frequency_unit"] = "%" if m.group(5) else "1"
+            facts.append({"object_type": "genomic_variant", "data": data, "provenance": _prov(m)})
+    if "genomic_report" in version.object_types:
+        panel, negative = _PANEL_RE.search(text), _NO_VARIANTS_RE.search(text)
+        anchor = panel or negative
+        if anchor:
+            data = {"assay_name": panel.group(0).strip() if panel else "NGS report"}
+            if negative:
+                data.update(no_variants_detected=True, result_summary=negative.group(0).strip())
+            facts.append({"object_type": "genomic_report", "data": data, "provenance": _prov(anchor)})
+    return facts
 
 
 def _canned_observations(version, text) -> list[dict]:
