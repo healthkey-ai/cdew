@@ -8,6 +8,7 @@ from apps.accounts.models import Identity, Role, RoleAssignment
 from apps.documents.ingest import ingest_upload
 from apps.documents.models import ExtractionRecord
 from apps.documents.parsing import parse_document
+from apps.pipeline.dryrun import fact_row
 from apps.prompts.models import PromptDefinition, PromptTestSample, PromptVersion
 
 
@@ -24,10 +25,18 @@ class PromptAuthoringTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(author).access_token}")
         self.lab = PromptDefinition.objects.get(key="lab_report")
 
-    def _new_draft(self):
-        r = self.client.post(f"/api/v1/prompts/definitions/{self.lab.id}/versions/", {}, format="json")
+    def _new_draft(self, **body):
+        r = self.client.post(f"/api/v1/prompts/definitions/{self.lab.id}/versions/", body, format="json")
         assert r.status_code == 201, r.content
         return r.json()
+
+    def _patch(self, draft, **data):
+        r = self.client.patch(f"/api/v1/prompts/versions/{draft['id']}/", data, format="json")
+        assert r.status_code == 200, r.content
+        return r.json()
+
+    def _publish(self, draft):
+        return self.client.post(f"/api/v1/prompts/versions/{draft['id']}/publish/")
 
     def test_reviewer_cannot_author(self):
         reviewer = _user("rev@x.org", [Role.REVIEWER])
@@ -35,10 +44,61 @@ class PromptAuthoringTests(APITestCase):
         assert self.client.get("/api/v1/prompts/definitions/").status_code == 403
 
     def test_clone_draft_from_active(self):
+        active = self.lab.active_version
         draft = self._new_draft()
         assert draft["status"] == "draft"
-        assert draft["version"] == 2  # active was v1
-        assert draft["json_schema"] == self.lab.active_version.json_schema  # cloned
+        assert draft["version"] == active.version + 1
+        # cloned: the object types and guidance — not the snapshot (a draft runs on the live catalog)
+        assert draft["object_types"] == active.object_types == ["measurement"]
+        assert draft["guidance"] == active.guidance
+        assert draft["object_type_snapshot"] == {}
+
+    def test_seeded_extractors_moved_onto_object_types(self):
+        # Migration 0009 (#95): a new published, active, object-typed version; v1 kept.
+        active = self.lab.active_version
+        assert active.status == "published" and active.version == 2
+        assert active.object_types == ["measurement"]
+        assert active.object_type_snapshot["measurement"]["omop_target"] == "measurement"
+        assert self.lab.versions.get(version=1).json_schema  # legacy v1 still there
+
+    def test_publish_snapshots_the_catalog(self):
+        from apps.prompts.models import ObjectType
+
+        draft = self._new_draft()
+        self._patch(draft, object_types=["measurement", "condition"],
+                    guidance={"condition": "Include the stage only if written with the diagnosis."})
+        assert self._publish(draft).status_code == 200
+        published = PromptVersion.objects.get(id=draft["id"])
+        assert list(published.object_type_snapshot) == ["measurement", "condition"]
+        # a later catalog change doesn't touch the published version
+        ObjectType.objects.filter(key="condition").update(label="Changed later")
+        published.refresh_from_db()
+        assert published.object_type_definitions()[1]["label"] == "Condition / diagnosis"
+
+    def test_publish_rejects_unknown_or_empty_object_types(self):
+        draft = self._new_draft()
+        self._patch(draft, object_types=["measurement", "genome_magic", "measurement"])
+        r = self._publish(draft)
+        assert r.status_code == 400
+        assert {f["code"] for f in r.json()["lint"]["findings"]} >= {"E071", "E072"}
+        self._patch(draft, object_types=[])
+        assert "E070" in {f["code"] for f in self._publish(draft).json()["lint"]["findings"]}
+        assert PromptVersion.objects.get(id=draft["id"]).status == "draft"
+
+    def test_object_typed_lint_warnings(self):
+        draft = self._new_draft()
+        self._patch(draft, prompt_text="old free-form prompt", guidance={"drug": "include supportive meds"})
+        r = self.client.post(f"/api/v1/prompts/versions/{draft['id']}/validate/")
+        codes = {f["code"] for f in r.json()["findings"]}
+        assert r.json()["ok"] is True and {"W170", "W172"} <= codes
+
+    def test_object_types_listed_for_any_role(self):
+        reviewer = _user("rev2@x.org", [Role.REVIEWER])
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(reviewer).access_token}")
+        r = self.client.get("/api/v1/prompts/object-types/")
+        assert r.status_code == 200
+        assert [o["key"] for o in r.json()] == ["measurement", "condition", "drug", "procedure", "observation"]
+        assert "specimen" in r.json()[0]["source_schema"]["properties"]
 
     def test_published_version_is_immutable(self):
         active = self.lab.active_version
@@ -48,7 +108,9 @@ class PromptAuthoringTests(APITestCase):
         assert active.prompt_text != "hacked"
 
     def test_publish_rejects_bad_schema(self):
-        draft = self._new_draft()
+        # A legacy json_schema draft (cloned from v1) still gets the schema lint.
+        draft = self._new_draft(from_version=self.lab.versions.get(version=1).id)
+        assert draft["object_types"] == []
         # break the schema: open object (no additionalProperties:false) + reserved field
         bad = {"type": "object", "properties": {"provenance": {"type": "string"}}}
         self.client.patch(f"/api/v1/prompts/versions/{draft['id']}/", {"json_schema": bad}, format="json")
@@ -191,7 +253,8 @@ class PromptTestSetTests(APITestCase):
         s = self._sample(self.lab)
         self._dry_run(self.lab)  # results persist on the sample
         s.refresh_from_db()
-        gold = [f["data"] for f in s.extracted_payload]
+        assert {f["object_type"] for f in s.extracted_payload} == {"measurement"}
+        gold = [fact_row(f) for f in s.extracted_payload]  # {object_type, ...data}
 
         s.expected_payload = gold
         s.save()
@@ -201,6 +264,11 @@ class PromptTestSetTests(APITestCase):
         s.save()
         job = self._dry_run(self.lab)
         assert job["summary"]["scored"] == 1 and job["summary"]["passed"] == 0
+
+        # Same data under another object type is a different fact.
+        s.expected_payload = [{**row, "object_type": "observation"} for row in gold]
+        s.save()
+        assert self._dry_run(self.lab)["summary"]["passed"] == 0
 
     def test_classifier_pass_fail(self):
         s = self._sample(self.classifier)
@@ -242,7 +310,7 @@ class PromptTestSetTests(APITestCase):
         s = PromptTestSample.objects.create(definition=self.lab, document=doc)
         self._dry_run(self.lab, sample_ids=[s.id])
         s.refresh_from_db()
-        gold = [f["data"] for f in s.extracted_payload]
+        gold = [fact_row(f) for f in s.extracted_payload]
         assert len(gold) == 2  # sanity: both labs extracted
 
         # Reversed gold → still a pass (facts are an unordered bag).

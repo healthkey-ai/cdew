@@ -31,10 +31,10 @@ class DirectRunner:
 
         return classify_document(doc).routed_types
 
-    def extract(self, doc, routed_types) -> int:
+    def extract(self, context) -> int:
         from .extract import extract_document
 
-        return extract_document(doc, routed_types)
+        return extract_document(context)
 
 
 def _stamp(job: ExtractionJob, stage: str) -> None:
@@ -96,8 +96,12 @@ def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
         job.progress = 0.85
         _stamp(job, Stage.EXTRACT)
         job.save(update_fields=["stage", "progress", "stage_history", "updated_at"])
+        # One context object for the stage (plan seam 3): P2b adds the patient's
+        # relevance here, from a step of its own before this one.
+        from .extract import ExtractionContext
+
         try:
-            runner.extract(doc, routed_types)
+            runner.extract(ExtractionContext(document=doc, routed_types=tuple(routed_types)))
         except Exception:
             logger.warning("pipeline: extract crashed job=%s", job.id)
             return _finish(job, JobStatus.FAILED, errors=[{"code": "extract_error"}])

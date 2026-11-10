@@ -6,7 +6,7 @@ from django.test import TestCase
 from apps.documents.ingest import ingest_upload
 from apps.documents.models import ExtractionRecord, ExtractionStatus
 from apps.documents.parsing import parse_document
-from apps.pipeline.extract import extract_document, resolve_span, run_extractor
+from apps.pipeline.extract import ExtractionContext, extract_document, resolve_span, run_extractor
 from apps.prompts.models import PromptDefinition, PromptVersion
 
 
@@ -15,6 +15,16 @@ def _parsed(content: bytes):
     parse_document(doc)
     doc.refresh_from_db()
     return doc
+
+
+def _ctx(doc, routed_types=()):
+    return ExtractionContext(document=doc, routed_types=tuple(routed_types))
+
+
+def _measurement(name, snippet, value=None, unit=None):
+    data = {"measurement_source_value": name, "value_as_number": value, "unit_source_value": unit}
+    return {"object_type": "measurement", "data": data,
+            "provenance": {"snippet": snippet, "char_start": 0, "char_end": 0, "confidence": 0.9}}
 
 
 class ResolveSpanTests(TestCase):
@@ -39,11 +49,14 @@ class ResolveSpanTests(TestCase):
 class ExtractDocumentTests(TestCase):
     def test_lab_records_staged_with_provenance(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL\nSodium 140 mmol/L")
-        n = extract_document(doc, ["lab_report"])
+        n = extract_document(_ctx(doc, ["lab_report"]))
         assert n >= 2
         rec = doc.extractions.first()
         assert rec.status == ExtractionStatus.STAGED
         assert rec.extractor_key == "lab_report"
+        # the seeded lab extractor is object-typed (#95): facts are measurements
+        assert (rec.object_type, rec.domain) == ("measurement", "measurement")
+        assert set(rec.payload) <= {"measurement_source_value", "value_as_number", "unit_source_value"}
         # provenance carries the immutable version id + a resolvable span
         lab = PromptDefinition.objects.get(key="lab_report")
         assert rec.provenance["extractor"]["version_id"] == lab.active_version_id
@@ -53,14 +66,38 @@ class ExtractDocumentTests(TestCase):
     def test_spanless_fact_flagged(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL")
         bogus = lambda version, text, *, model=None, document=None: [  # noqa: E731
-            {"data": {"test_name": "X", "value": 1, "unit": "u"},
-             "provenance": {"snippet": "NOT_IN_DOC", "char_start": 9999, "char_end": 10000, "confidence": 0.4}}
+            {**_measurement("X", "NOT_IN_DOC"), "provenance": {"snippet": "NOT_IN_DOC", "char_start": 9999,
+                                                              "char_end": 10000, "confidence": 0.4}}
         ]
         lab = PromptDefinition.objects.get(key="lab_report")
         with patch("apps.pipeline.extract._facts_fn", return_value=bogus):
-            run_extractor(doc, lab, lab.active_version, doc.text.content)
+            run_extractor(_ctx(doc), lab, lab.active_version)
         rec = doc.extractions.get()
         assert rec.status == ExtractionStatus.FLAGGED
+
+    def test_fact_of_an_unselected_object_type_is_flagged(self):
+        doc = _parsed(b"Hemoglobin 9.1 g/dL")
+        stray = lambda version, text, *, model=None, document=None: [  # noqa: E731
+            {"object_type": "drug", "data": {"drug_source_value": "Hemoglobin"},
+             "provenance": {"snippet": "Hemoglobin", "char_start": 0, "char_end": 10, "confidence": 0.9}}
+        ]
+        lab = PromptDefinition.objects.get(key="lab_report")
+        with patch("apps.pipeline.extract._facts_fn", return_value=stray):
+            run_extractor(_ctx(doc), lab, lab.active_version)
+        assert doc.extractions.get().status == ExtractionStatus.FLAGGED
+
+    def test_source_wording_kept_verbatim_with_whitespace_collapsed(self):
+        doc = _parsed(b"Hemoglobin 9.1 g/dL")
+        spaced = lambda version, text, *, model=None, document=None: [  # noqa: E731
+            _measurement("  HGB\n  (venous)  ", "Hemoglobin 9.1 g/dL", 9.1, "g/dL")
+        ]
+        lab = PromptDefinition.objects.get(key="lab_report")
+        with patch("apps.pipeline.extract._facts_fn", return_value=spaced):
+            run_extractor(_ctx(doc), lab, lab.active_version)
+        # case and wording as written (promop's curators own synonyms), nulls dropped
+        assert doc.extractions.get().payload == {
+            "measurement_source_value": "HGB (venous)", "value_as_number": 9.1, "unit_source_value": "g/dL",
+        }
 
 
 class MultimodalExtractTests(TestCase):
@@ -85,12 +122,11 @@ class MultimodalExtractTests(TestCase):
 
         def spy(version, text, *, model=None, document=None):
             seen["document"] = document
-            return [{"data": {"test_name": "Estradiol", "value": 120, "unit": "pg/mL"},
-                     "provenance": {"snippet": "Estradiol 120 43-180 pg/mL", "char_start": 0, "char_end": 0, "confidence": 0.9}}]
+            return [_measurement("Estradiol", "Estradiol 120 43-180 pg/mL", 120, "pg/mL")]
 
         lab = PromptDefinition.objects.get(key="lab_report")
         with patch("apps.pipeline.extract._facts_fn", return_value=spy):
-            run_extractor(doc, lab, lab.active_version, doc.text.content)
+            run_extractor(_ctx(doc), lab, lab.active_version)
         # the original PDF bytes were handed to the extractor
         assert seen["document"] is not None
         assert seen["document"]["media_type"] == "application/pdf"
@@ -109,34 +145,46 @@ class MultimodalExtractTests(TestCase):
 
         lab = PromptDefinition.objects.get(key="lab_report")
         with patch("apps.pipeline.extract._facts_fn", return_value=spy):
-            run_extractor(doc, lab, lab.active_version, doc.text.content)
+            run_extractor(_ctx(doc), lab, lab.active_version)
         assert seen["document"] is None
 
     def test_idempotent_reextract(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL\nSodium 140 mmol/L")
-        extract_document(doc, ["lab_report"])
+        extract_document(_ctx(doc, ["lab_report"]))
         first = ExtractionRecord.objects.filter(document=doc).count()
-        extract_document(doc, ["lab_report"])
+        extract_document(_ctx(doc, ["lab_report"]))
         assert ExtractionRecord.objects.filter(document=doc).count() == first  # replaced, not duplicated
 
     def test_version_bump_replaces(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL")
-        extract_document(doc, ["lab_report"])
+        extract_document(_ctx(doc, ["lab_report"]))
         lab = PromptDefinition.objects.get(key="lab_report")
-        v1 = lab.active_version
-        v2 = PromptVersion.objects.create(
-            definition=lab, version=2, status="published",
-            prompt_text=v1.prompt_text, json_schema=v1.json_schema, model=v1.model, params=v1.params,
+        current = lab.active_version
+        bumped = PromptVersion.objects.create(
+            definition=lab, version=current.version + 1, status="published",
+            object_types=current.object_types, object_type_snapshot=current.object_type_snapshot,
+            model=current.model, params=current.params,
         )
-        lab.active_version = v2
+        lab.active_version = bumped
         lab.save(update_fields=["active_version"])
 
-        extract_document(doc, ["lab_report"])
+        extract_document(_ctx(doc, ["lab_report"]))
         version_ids = {r.extractor_version_id for r in doc.extractions.all()}
-        assert version_ids == {v2.id}  # old version's records gone
+        assert version_ids == {bumped.id}  # old version's records gone
+
+    def test_legacy_json_schema_version_still_runs(self):
+        # The pre-#95 published version stays re-runnable for reproducibility.
+        doc = _parsed(b"Hemoglobin 9.1 g/dL")
+        lab = PromptDefinition.objects.get(key="lab_report")
+        legacy = lab.versions.get(version=1)
+        assert not legacy.is_object_typed and legacy.json_schema
+        run_extractor(_ctx(doc), lab, legacy)
+        rec = doc.extractions.get()
+        assert (rec.object_type, rec.domain) == ("", "labs")
+        assert rec.payload["test_name"] == "Hemoglobin"
 
     def test_fanout_lab_and_genetics(self):
         doc = _parsed(b"Hemoglobin 9.1 g/dL\nFISH: del(17p) positive")
-        extract_document(doc, ["lab_report", "genetics_report"])
+        extract_document(_ctx(doc, ["lab_report", "genetics_report"]))
         keys = set(doc.extractions.values_list("extractor_key", flat=True))
         assert keys == {"lab_report", "genetics_report"}

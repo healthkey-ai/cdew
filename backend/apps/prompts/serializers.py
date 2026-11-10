@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from apps.pipeline.models import DryRunJob
 
-from .models import PromptDefinition, PromptTestSample, PromptVersion
+from .models import ObjectType, PromptDefinition, PromptTestSample, PromptVersion
 
 
 class DryRunJobSerializer(serializers.ModelSerializer):
@@ -18,14 +18,39 @@ class DryRunJobSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ObjectTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ObjectType
+        fields = (
+            "key", "label", "description", "omop_target", "promop_endpoint", "source_schema",
+            "field_guide", "default_guidance", "extraction_only", "commit_required",
+            "promop_schema_version", "synced_at",
+        )
+        read_only_fields = fields
+
+
 class PromptVersionSerializer(serializers.ModelSerializer):
     class Meta:
         model = PromptVersion
         fields = (
             "id", "definition", "version", "status", "prompt_text", "json_schema",
-            "taxonomy", "model", "params", "notes", "created_by", "created_at", "published_at",
+            "taxonomy", "object_types", "guidance", "object_type_snapshot",
+            "model", "params", "notes", "created_by", "created_at", "published_at",
         )
-        read_only_fields = ("id", "definition", "version", "status", "created_by", "created_at", "published_at")
+        read_only_fields = (
+            "id", "definition", "version", "status", "object_type_snapshot",
+            "created_by", "created_at", "published_at",
+        )
+
+    def validate_object_types(self, value):
+        if not isinstance(value, list) or not all(isinstance(k, str) for k in value):
+            raise serializers.ValidationError("object_types must be a list of catalog keys.")
+        return value
+
+    def validate_guidance(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("guidance must be an object of {object type: text}.")
+        return value
 
 
 class _ActiveVersionSerializer(serializers.ModelSerializer):

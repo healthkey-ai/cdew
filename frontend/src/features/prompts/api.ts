@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
+import { KEYS } from "@/lib/keys";
 
 export interface ActiveVersion {
   id: number;
@@ -24,13 +25,59 @@ export interface PromptVersion {
   version: number;
   status: "draft" | "published" | "archived";
   prompt_text: string;
-  json_schema: Record<string, unknown>;
+  json_schema: Record<string, unknown>; // legacy extractors
   taxonomy: unknown[];
+  /** Object-typed extractors (#95): catalog keys, per-object guidance, and (once
+   * published) the pinned definitions. Empty `object_types` = a legacy extractor. */
+  object_types: string[];
+  guidance: Record<string, string>;
+  object_type_snapshot: Record<string, ObjectType>;
   model: string;
   params: Record<string, unknown>;
   notes: string;
   published_at: string | null;
 }
+/** A JSON Schema property as the catalog writes it. */
+export interface CatalogField {
+  type: string | string[];
+  format?: string;
+  description?: string;
+}
+
+/** One object type of the catalog (alignment §3.1, #94), synced from promop. */
+export interface ObjectType {
+  key: string;
+  label: string;
+  description: string;
+  omop_target: string;
+  promop_endpoint: string;
+  source_schema: { properties: Record<string, CatalogField>; required: string[] };
+  field_guide: Record<string, string>;
+  default_guidance: string;
+  extraction_only: string[];
+  commit_required: string[];
+  promop_schema_version: string;
+}
+
+/** Is this extractor version object-typed (vs a legacy json_schema one)? A new,
+ * empty draft counts as object-typed — that's the only kind authors create now. */
+export const isObjectTyped = (v: Pick<PromptVersion, "object_types" | "json_schema">) =>
+  v.object_types.length > 0 || Object.keys(v.json_schema ?? {}).length === 0;
+
+/** The comparable shape of an extracted fact (alignment §7.3): object-typed facts
+ * are `{object_type, ...data}` rows, so test-set gold is a list of those. */
+export const factRow = (f: { object_type?: string; data: Record<string, unknown> }) =>
+  f.object_type ? { object_type: f.object_type, ...f.data } : f.data;
+
+/** The object catalog — read by authors (selection) and reviewers (manual facts). */
+export function useObjectTypes() {
+  return useQuery({
+    queryKey: KEYS.objectTypes,
+    queryFn: async () => (await api.get<ObjectType[]>(`${P}/object-types/`)).data,
+    staleTime: 5 * 60_000,
+  });
+}
+
 export interface LintFinding {
   level: "error" | "warning";
   code: string;
@@ -60,6 +107,7 @@ export interface TestSample {
 }
 
 export interface DryRunFact {
+  object_type?: string; // object-typed extractors
   data: Record<string, unknown>;
   snippet: string;
   char_start: number;

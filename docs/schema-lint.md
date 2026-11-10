@@ -137,6 +137,10 @@ hard rule is enforced by the type.
 
 ## 5. Layer 4 — extractor domain contract
 
+*Legacy `json_schema` extractors only.* Object-typed extractors (§5a) get their contract from the
+synced catalog instead: promop's required source fields become `ObjectType.commit_required`, which
+P4 (#98) turns into the commit gate.
+
 Beyond structure, each fact's `data` must carry the fields the domain needs downstream. The contract
 is keyed by the definition's `domain` and lives in a small extensible registry —
 [`backend/apps/prompts/lint/domain_contracts.py`](../backend/apps/prompts/lint/domain_contracts.py)
@@ -162,6 +166,29 @@ nothing un-mappable reaches promop. The table below mirrors that module.
 | `E111` | error | `domain` is not a known domain in the registry (typo / unsupported). |
 
 *(The `data` schema may add any other author-defined fields; the contract only asserts the minimum.)*
+
+---
+
+## 5a. Object-typed extractors *(promop alignment P1, #95)*
+
+New extractor versions don't author a `data` schema. They select **object types** from the catalog
+(`ObjectType`, synced from promop's OpenAPI — [`promop-alignment.md`](./promop-alignment.md) §3–§5)
+and may add per-object *extraction-technique* guidance. The fields, and so the output model, come
+from the catalog; the prompt is composed from it (§7 there). Layers 1–4 above therefore apply only to
+**legacy** versions that still carry a `json_schema`. A version with `object_types` is linted here
+instead, and so is a new version with neither.
+
+| Code | Level | Rule |
+|------|-------|------|
+| `E070` | error | No object type selected. |
+| `E071` | error | An `object_types` key is not in the catalog. |
+| `E072` | error | An object type is selected twice, or a `guidance` value is not text. |
+| `W170` | warn | `guidance` names an object type that isn't selected (it is ignored). |
+| `W171` | warn | A legacy `json_schema` extractor — select catalog object types instead. |
+| `W172` | warn | An object-typed version has prompt text; it is ignored (the prompt is composed). |
+
+On **publish**, the selected object types' definitions are snapshotted onto the version
+(`object_type_snapshot`), so a later catalog sync only affects versions published after it.
 
 ---
 

@@ -11,7 +11,7 @@ export interface EditFact {
 
 export interface NewFact {
   document: number;
-  domain: string;
+  object_type: string; // a catalog object type (#96); its fields are the payload's
   snippet: string;
   payload: Record<string, unknown>;
 }

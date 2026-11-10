@@ -20,24 +20,39 @@ logger = logging.getLogger("apps.pipeline")
 def _facts_equal(extracted_data: list, expected) -> bool:
     """Order-insensitive multiset equality (mirrors the frontend's `factsEqual`).
     Facts are an unordered bag, so a reordering by the LLM isn't a mismatch; a
-    duplicated fact with no counterpart is."""
+    duplicated fact with no counterpart is. Unset (null) fields don't count."""
     def key(d):
-        return json.dumps(d, sort_keys=True, default=str)
+        return json.dumps({k: v for k, v in (d or {}).items() if v is not None}, sort_keys=True, default=str)
 
     return Counter(map(key, extracted_data)) == Counter(map(key, expected or []))
 
 
+def fact_row(fact: dict) -> dict:
+    """The comparable shape of a dry-run fact: object-typed facts compare as
+    ``{object_type, ...data}`` (alignment §7.3: keyed by (object_type, data)), so
+    test-set gold is a list of those rows; legacy facts compare as their data."""
+    if fact.get("object_type"):
+        return {"object_type": fact["object_type"], **(fact.get("data") or {})}
+    return fact.get("data") or {}
+
+
 def _extractor_result(version, text, document=None):
+    from .extract import clean_fact_data
+
+    typed = version.is_object_typed
     facts = []
     for f in _facts_fn()(version, text, document=document):
         prov = f.get("provenance", {}) or {}
         cs, ce, ok = resolve_span(text, prov, trust_snippet=document is not None)
-        facts.append({
-            "data": f.get("data", {}),
+        row = {
+            "data": clean_fact_data(f.get("data")) if typed else f.get("data", {}),
             "snippet": prov.get("snippet", ""),
             "char_start": cs, "char_end": ce, "resolved": ok,
             "confidence": prov.get("confidence"),
-        })
+        }
+        if typed:
+            row["object_type"] = f.get("object_type", "")
+        facts.append(row)
     return facts
 
 
@@ -69,7 +84,7 @@ def dry_run_sample(version, s) -> dict:
         s.extracted_payload = facts
         if s.expected_payload is not None:
             row["expected"] = s.expected_payload
-            row["passed"] = _facts_equal([f["data"] for f in facts], s.expected_payload)
+            row["passed"] = _facts_equal([fact_row(f) for f in facts], s.expected_payload)
     else:
         cls = _classifier_result(version, text, s.expected_payload)
         row.update(cls)

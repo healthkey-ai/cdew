@@ -136,7 +136,7 @@ below are polish/expansion on top of the functional v1 pages.
 
 ### Finalize Inbox UI — *scaffolded: upload + queue + `status` filter + review modal; pending: pagination, richer queue triage (by reason/flag), bulk upload*
 ### Finalize Taxonomies management UI — *scaffolded: classifier prompt + `type/description/threshold` rows + lifecycle; pending: version diff, inline lint hints, params editor*
-### Finalize Taxonomy extractors management UI — *scaffolded: per-extractor prompt + attribute rows → lint-valid `data` schema + lifecycle; pending: version diff, raw-JSON advanced mode, `document` metadata schema, routing editor*
+### Finalize Taxonomy extractors management UI — *built: catalog object-type selection + per-object guidance (promop alignment P1); legacy attribute-row editor kept for old versions; pending: version diff, create-extractor UI, routing editor, composed-prompt preview*
 ### Implement some sort of pipeline log — *surface `ExtractionJob` stage/progress/errors history + Prefect run link (PHI-safe codes only)*
 ### Implement Validation UI — *expand the Review surface into full queues (review / human-classification / low-confidence) with dry-run-style side-by-side*
 ### Implement PROMOP interface — *commit-phase UI (design §12 / Phase 7): coding review + push status*

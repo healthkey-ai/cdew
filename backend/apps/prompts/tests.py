@@ -86,6 +86,39 @@ class ExtractAgentTests(TestCase):
         for f in facts:
             assert "data" in f and "provenance" in f
             assert required_prov <= set(f["provenance"])
+            assert f["object_type"] == "measurement"  # seeded lab extractor is object-typed (#95)
+
+    def test_multi_object_extraction_through_the_agent(self):
+        """#96 acceptance: one pass emits heterogeneous, per-object-validated,
+        provenance-grounded facts — driven through Pydantic AI with a FunctionModel
+        that sees the composed prompt and answers with a tagged union."""
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+        from pydantic_ai.models.function import FunctionModel
+
+        from apps.prompts.agents import extract_facts
+        from apps.prompts.models import PromptDefinition, PromptVersion
+
+        definition = PromptDefinition.objects.create(kind="extractor", key="office_visit_x", name="Office visit")
+        version = PromptVersion.objects.create(
+            definition=definition, version=1, object_types=["condition", "drug"],
+            guidance={"drug": "Include supportive medications."},
+        )
+        seen = {}
+
+        def respond(messages, info):
+            seen["system"] = messages[0].parts[0].content
+            prov = {"page": 0, "char_start": 0, "char_end": 9, "snippet": "Metformin", "confidence": 0.9}
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {"facts": [
+                {"object_type": "condition", "data": {"condition_source_value": "Type 2 diabetes"}, "provenance": prov},
+                {"object_type": "drug", "data": {"drug_source_value": "Metformin", "quantity": 500}, "provenance": prov},
+            ]})])
+
+        facts = extract_facts(version, "T2DM. Metformin 500 mg.", model=FunctionModel(respond))
+        assert [f["object_type"] for f in facts] == ["condition", "drug"]
+        assert facts[1]["data"]["quantity"] == 500
+        assert "## Object type: condition" in seen["system"] and "## Object type: drug" in seen["system"]
+        assert "Include supportive medications." in seen["system"]
+        assert "populate `provenance`" in seen["system"]
 
     def test_extraction_input_sends_original_document_for_pdf(self):
         # #84: a PDF/image is sent as BinaryContent (the model reads the true

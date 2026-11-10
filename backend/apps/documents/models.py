@@ -167,6 +167,9 @@ class ExtractionRecord(models.Model):
 
     document = models.ForeignKey(SourceDocument, on_delete=models.CASCADE, related_name="extractions")
     extractor_key = models.CharField(max_length=64)
+    # The catalog object type the fact is (prompts.ObjectType.key, #96); blank for
+    # facts from legacy json_schema extractors. `domain` mirrors it for new facts.
+    object_type = models.CharField(max_length=64, blank=True, default="", db_index=True)
     domain = models.CharField(max_length=32, blank=True, default="")
     payload = models.JSONField(default=dict)       # the fact's data (PHI)
     provenance = models.JSONField(default=dict)    # {document_id, page, char_start/end, snippet, extractor{…}, …} (PHI)
