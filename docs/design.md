@@ -377,7 +377,17 @@ draft (optionally cloning a version); `PATCH` a draft (blocked once published); 
 > **object types** and adds optional per-object guidance; the fields shown read-only come from the
 > catalog. Legacy versions keep the old editor: a prompt plus the `data` schema as
 > `name / type / description / required / nullable` **attribute rows**. Either way the system owns
-> the `facts` / `provenance` envelope. Both share one version-lifecycle
+> the `facts` / `provenance` envelope.
+>
+> **Creating and routing extractors.**
+> - **+ Extractor** creates an extractor: key, name, description and the document types it runs on.
+>   It starts with an empty object-typed draft, and runs once a version is published.
+> - `kind` and `key` are fixed after creation, and `ad_hoc` is reserved.
+> - Each extractor's **Runs on** list (`triggers_on_types`) and its enabled flag are editable. They
+>   aren't versioned: a change applies to the next classified document.
+> - A type missing from the active classifier taxonomy is flagged (`unknown_triggers`, schema-lint
+>   §8 W120), because it would never fire.
+> - A definition that has produced results can't be deleted; disable it instead. Both share one version-lifecycle
 > toolbar (draft → validate → dry-run → publish → activate). The full tabbed editor + version-diff
 > polish is tracked in [`TODO.md`](../TODO.md).
 

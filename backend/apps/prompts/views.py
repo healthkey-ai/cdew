@@ -25,6 +25,7 @@ from .serializers import (
     PromptDefinitionSerializer,
     PromptTestSampleSerializer,
     PromptVersionSerializer,
+    active_taxonomy_types,
 )
 
 logger = logging.getLogger("apps.prompts")
@@ -56,6 +57,37 @@ class PromptDefinitionViewSet(viewsets.ModelViewSet):
     serializer_class = PromptDefinitionSerializer
     permission_classes = [IsPromptAuthor]
 
+    def get_serializer_context(self):
+        # The active taxonomy, read once per request for every definition's `unknown_triggers`.
+        return {**super().get_serializer_context(), "taxonomy_types": active_taxonomy_types()}
+
+    def perform_create(self, serializer):
+        """A new extractor starts with an empty object-typed draft (v1), so the
+        author goes straight to picking object types and publishing."""
+        definition = serializer.save()
+        PromptVersion.objects.create(
+            definition=definition,
+            version=1,
+            status="draft",
+            created_by=self.request.user if self.request.user.is_authenticated else None,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete an extractor only while nothing has run on it: the classifier and
+        any definition whose versions produced records are kept (their
+        `*_version_id` provenance must stay resolvable) — disable it instead."""
+        from apps.documents.models import DocumentClassification, ExtractionRecord
+
+        definition = self.get_object()
+        version_ids = list(definition.versions.values_list("id", flat=True))
+        used = (definition.kind == PromptKind.CLASSIFIER
+                or ExtractionRecord.objects.filter(extractor_version_id__in=version_ids).exists()
+                or DocumentClassification.objects.filter(classifier_version_id__in=version_ids).exists())
+        if used:
+            return Response({"detail": "This definition has produced results and is kept; disable it instead."},
+                            status=status.HTTP_409_CONFLICT)
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=True, methods=["get", "post"])
     def versions(self, request, pk=None):
         definition = self.get_object()
@@ -81,7 +113,7 @@ class PromptDefinitionViewSet(viewsets.ModelViewSet):
             # A draft extracts against the live catalog; publish snapshots it again.
             object_types=base.object_types if base else [],
             guidance=base.guidance if base else {},
-            model=base.model if base else "gemini-2.5-flash",
+            model=base.model if base else "",  # "" → the deployment's LLM_MODEL
             params=base.params if base else {},
             created_by=request.user if request.user.is_authenticated else None,
         )
