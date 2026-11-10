@@ -20,11 +20,14 @@ import {
   usePromptActions,
   usePromptDefinitions,
   usePromptVersions,
+  useTaxonomyTypes,
 } from "@/features/prompts/api";
 import { TestSetPanel } from "@/features/prompts/TestSetPanel";
 import { VersionToolbar } from "@/features/prompts/VersionToolbar";
 import { humanize } from "@/lib/utils";
+import { NewExtractorDialog } from "./NewExtractorDialog";
 import { ObjectTypesEditor } from "./ObjectTypesEditor";
+import { RoutingEditor } from "./RoutingEditor";
 import { type AttrRow, ATTR_TYPES, rowsToSchema, schemaToRows } from "./schema";
 
 const EMPTY_ROW: AttrRow = { name: "", type: "string", description: "", required: false, nullable: false };
@@ -42,6 +45,8 @@ export function ExtractorsPage() {
   const versions = usePromptVersions(defId);
   const actions = usePromptActions(defId);
   const catalog = useObjectTypes();
+  const taxonomyTypes = useTaxonomyTypes();
+  const [creating, setCreating] = useState(false);
 
   const [selVersion, setSelVersion] = useState<PromptVersion | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -114,6 +119,9 @@ export function ExtractorsPage() {
         {/* extractor list */}
         <Card className="h-fit">
           <CardContent className="flex flex-col gap-0.5 p-2">
+            <Button variant="outline" size="sm" className="mb-1.5 justify-start" onClick={() => setCreating(true)}>
+              <Plus /> Extractor
+            </Button>
             {extractors.map((d) => (
               <button
                 key={d.id}
@@ -123,11 +131,16 @@ export function ExtractorsPage() {
                 }}
                 className={
                   "flex flex-col items-start rounded-md px-2.5 py-1.5 text-left text-sm transition-colors " +
-                  (d.id === defId ? "bg-accent font-medium text-accent-foreground" : "hover:bg-muted")
+                  (d.id === defId ? "bg-accent font-medium text-accent-foreground" : "hover:bg-muted") +
+                  (d.enabled ? "" : " opacity-60")
                 }
               >
                 <span className="font-mono">{d.key}</span>
-                <span className="text-xs text-muted-foreground">v{d.active_version?.version ?? "—"}</span>
+                <span className="text-xs text-muted-foreground">
+                  {d.active_version ? `v${d.active_version.version}` : "draft only"}
+                  {!d.enabled && " · disabled"}
+                  {d.unknown_triggers.length > 0 && " · ⚠ routing"}
+                </span>
               </button>
             ))}
             {extractors.length === 0 && (
@@ -162,6 +175,9 @@ export function ExtractorsPage() {
             <TabsContent value="editor" className="mt-4">
               <Card>
                 <CardContent className="space-y-4">
+              {def.description && <p className="text-sm text-muted-foreground">{def.description}</p>}
+              <RoutingEditor def={def} taxonomyTypes={taxonomyTypes} />
+
               <VersionToolbar
                 def={def}
                 versions={versions.data}
@@ -319,7 +335,7 @@ export function ExtractorsPage() {
                       value={model}
                       disabled={!isDraft}
                       onChange={(e) => setModel(e.target.value)}
-                      placeholder="gemini-2.5-flash"
+                      placeholder="deployment default"
                     />
                   </div>
                 </>
@@ -338,6 +354,16 @@ export function ExtractorsPage() {
           </Tabs>
         )}
       </div>
+
+      <NewExtractorDialog
+        open={creating}
+        onOpenChange={setCreating}
+        taxonomyTypes={taxonomyTypes}
+        onCreated={(d) => {
+          setDefId(d.id);
+          setSelVersion(null);
+        }}
+      />
     </section>
   );
 }

@@ -1,8 +1,10 @@
+import re
+
 from rest_framework import serializers
 
 from apps.pipeline.models import DryRunJob
 
-from .models import DocumentType, ObjectType, PromptDefinition, PromptTestSample, PromptVersion
+from .models import DocumentType, ObjectType, PromptDefinition, PromptKind, PromptTestSample, PromptVersion
 
 
 class DryRunJobSerializer(serializers.ModelSerializer):
@@ -66,17 +68,67 @@ class _ActiveVersionSerializer(serializers.ModelSerializer):
         fields = ("id", "version", "status")
 
 
+_SLUG = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
 class PromptDefinitionSerializer(serializers.ModelSerializer):
+    """A classifier or extractor registry entry. Authors create **extractors** here
+    (the classifier is seeded); `kind` and `key` are fixed once created — `key` is
+    stamped on every fact's provenance. `triggers_on_types` (routing) and
+    `enabled` stay editable; `unknown_triggers` lists routed types the active
+    classifier taxonomy doesn't have (schema-lint §8 W120), so they'd never fire."""
+
     active_version = _ActiveVersionSerializer(read_only=True)
+    unknown_triggers = serializers.SerializerMethodField()
 
     class Meta:
         model = PromptDefinition
         fields = (
             "id", "kind", "key", "name", "description", "domain", "enabled",
-            "triggers_on_types", "active_version",
+            "triggers_on_types", "active_version", "unknown_triggers",
         )
-        # kind/key/domain are set at creation and stable thereafter.
-        read_only_fields = ("id", "active_version")
+        read_only_fields = ("id", "active_version", "unknown_triggers")
+
+    def validate_key(self, value):
+        from .adhoc import AD_HOC_KEY
+
+        if self.instance is not None and value != self.instance.key:
+            raise serializers.ValidationError("The key is fixed once the definition exists.")
+        if not _SLUG.match(value or ""):
+            raise serializers.ValidationError("Use lowercase letters, digits and underscores, starting with a letter.")
+        if value == AD_HOC_KEY:
+            raise serializers.ValidationError(f"'{AD_HOC_KEY}' is reserved for ad-hoc extraction.")
+        return value
+
+    def validate_kind(self, value):
+        if self.instance is not None and value != self.instance.kind:
+            raise serializers.ValidationError("The kind is fixed once the definition exists.")
+        if self.instance is None and value != PromptKind.EXTRACTOR:
+            raise serializers.ValidationError("Only extractors can be created; the classifier is system-seeded.")
+        return value
+
+    def validate_triggers_on_types(self, value):
+        if not isinstance(value, list) or not all(isinstance(t, str) and _SLUG.match(t) for t in value):
+            raise serializers.ValidationError("A list of taxonomy type slugs.")
+        return list(dict.fromkeys(value))  # de-duplicated, order kept
+
+    def get_unknown_triggers(self, obj) -> list[str]:
+        if obj.kind != PromptKind.EXTRACTOR:
+            return []
+        known = self.context.get("taxonomy_types")
+        if known is None:
+            known = active_taxonomy_types()
+        return [t for t in obj.triggers_on_types or [] if t not in known]
+
+
+def active_taxonomy_types() -> set[str]:
+    """The type slugs of the active classifier's taxonomy (empty without one)."""
+    from .resolve import NoActiveVersion, get_active_classifier
+
+    try:
+        return {t.get("type") for t in get_active_classifier().taxonomy if isinstance(t, dict)}
+    except NoActiveVersion:
+        return set()
 
 
 class PromptTestSampleSerializer(serializers.ModelSerializer):

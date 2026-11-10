@@ -12,12 +12,42 @@ export interface ActiveVersion {
 export interface PromptDefinition {
   id: number;
   kind: "classifier" | "extractor";
-  key: string;
+  key: string; // fixed once created
   name: string;
+  description: string;
   domain: string;
   enabled: boolean;
-  triggers_on_types: string[];
+  triggers_on_types: string[]; // routing: taxonomy types that run this extractor
   active_version: ActiveVersion | null;
+  unknown_triggers: string[]; // routed types the active taxonomy doesn't have — they never fire
+}
+
+/** Create an extractor (it starts with an empty object-typed draft), or update a
+ * definition's name / description / routing / enabled flag. */
+export function useDefinitionActions() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: KEYS.promptDefinitions });
+  return {
+    create: useMutation({
+      mutationFn: async (d: Pick<PromptDefinition, "key" | "name" | "description" | "triggers_on_types">) =>
+        (await api.post<PromptDefinition>(`${P}/definitions/`, { ...d, kind: "extractor", enabled: true })).data,
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: async ({ id, ...d }: Partial<PromptDefinition> & { id: number }) =>
+        (await api.patch<PromptDefinition>(`${P}/definitions/${id}/`, d)).data,
+      onSuccess: invalidate,
+    }),
+  };
+}
+
+/** The active classifier's taxonomy types — what an extractor can be routed on. */
+export function useTaxonomyTypes(): string[] {
+  const defs = usePromptDefinitions();
+  const classifier = defs.data?.find((d) => d.kind === "classifier") ?? null;
+  const versions = usePromptVersions(classifier?.id ?? null);
+  const active = versions.data?.find((v) => v.id === classifier?.active_version?.id);
+  return ((active?.taxonomy ?? []) as { type?: string }[]).map((t) => t.type ?? "").filter(Boolean);
 }
 export interface PromptVersion {
   id: number;
