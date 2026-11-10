@@ -24,6 +24,40 @@ class PromptStatus(models.TextChoices):
     ARCHIVED = "archived", "Archived"
 
 
+class ObjectType(models.Model):
+    """One promop write target CDEW extracts (alignment §3–§4, #94): its source/raw
+    field schema, synced from promop's OpenAPI (``catalog.py``,
+    ``manage.py sync_object_types``), plus CDEW's extraction hints. Not
+    author-editable — authors pick object types and add technique guidance."""
+
+    key = models.SlugField(max_length=64, unique=True)   # the facts[] discriminator
+    label = models.CharField(max_length=128)
+    description = models.TextField(blank=True, default="")
+    omop_target = models.CharField(max_length=64)          # promop table; code-lookup `omop_table`
+    promop_endpoint = models.CharField(max_length=128)     # bulk-upsert target at commit (§8)
+    source_schema = models.JSONField(default=dict)         # JSON Schema of the source/raw subset
+    field_guide = models.JSONField(default=dict)           # {field: extraction hint}
+    default_guidance = models.TextField(blank=True, default="")
+    extraction_only = models.JSONField(default=list)       # CDEW-only fields, never committed (e.g. specimen)
+    commit_required = models.JSONField(default=list)       # promop's required source fields at commit
+    promop_schema_version = models.CharField(max_length=64, blank=True, default="")
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    synced_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "object_type"
+        ordering = ("sort_order", "key")
+
+    def __str__(self):
+        return self.key
+
+    def definition(self) -> dict:
+        """The definition a published version snapshots (alignment §9)."""
+        from .catalog import SNAPSHOT_FIELDS
+
+        return {f: getattr(self, f) for f in SNAPSHOT_FIELDS}
+
+
 class PromptDefinition(models.Model):
     kind = models.CharField(max_length=16, choices=PromptKind.choices)
     key = models.CharField(max_length=64, unique=True)
@@ -50,9 +84,18 @@ class PromptVersion(models.Model):
     version = models.PositiveIntegerField()
     status = models.CharField(max_length=16, choices=PromptStatus.choices, default=PromptStatus.DRAFT)
 
-    prompt_text = models.TextField(blank=True, default="")
-    json_schema = models.JSONField(default=dict)   # extractors (Phase 4)
+    prompt_text = models.TextField(blank=True, default="")  # classifier; legacy extractors
+    json_schema = models.JSONField(default=dict)   # legacy extractors: one authored `data` schema
     taxonomy = models.JSONField(default=list)      # classifier: [{type, description, threshold}]
+    # Object-type extractors (alignment §4.2, #95). Set on the version, not the
+    # definition, so changing what an extractor targets is a new version like any
+    # other content change. A version with object_types is composed from the
+    # catalog; one without is a legacy json_schema extractor.
+    object_types = models.JSONField(default=list)  # [catalog key, …] — one or many
+    guidance = models.JSONField(default=dict)      # {key: extraction-technique guidance}
+    # Filled at publish: each targeted object type's definition (catalog.SNAPSHOT_FIELDS),
+    # so a published version keeps running against the schemas it was tested on.
+    object_type_snapshot = models.JSONField(default=dict)
     model = models.CharField(max_length=64, blank=True, default="")
     params = models.JSONField(default=dict)        # temperature, max_chars, low_floor, …
 
@@ -71,6 +114,18 @@ class PromptVersion(models.Model):
 
     def __str__(self):
         return f"{self.definition.key} v{self.version} ({self.status})"
+
+    @property
+    def is_object_typed(self) -> bool:
+        return bool(self.object_types)
+
+    def object_type_definitions(self) -> list[dict]:
+        """The definitions this version extracts against, in its selection order:
+        the publish-time snapshot, else (a draft) the live catalog."""
+        if self.object_type_snapshot:
+            return [self.object_type_snapshot[k] for k in self.object_types if k in self.object_type_snapshot]
+        live = {o.key: o for o in ObjectType.objects.filter(key__in=self.object_types)}
+        return [live[k].definition() for k in self.object_types if k in live]
 
 
 class PromptTestSample(models.Model):

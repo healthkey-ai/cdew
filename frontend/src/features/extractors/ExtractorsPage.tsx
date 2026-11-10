@@ -12,17 +12,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { type PromptVersion, usePromptActions, usePromptDefinitions, usePromptVersions } from "@/features/prompts/api";
+import {
+  isObjectTyped,
+  type ObjectType,
+  type PromptVersion,
+  useObjectTypes,
+  usePromptActions,
+  usePromptDefinitions,
+  usePromptVersions,
+} from "@/features/prompts/api";
 import { TestSetPanel } from "@/features/prompts/TestSetPanel";
 import { VersionToolbar } from "@/features/prompts/VersionToolbar";
 import { humanize } from "@/lib/utils";
+import { ObjectTypesEditor } from "./ObjectTypesEditor";
 import { type AttrRow, ATTR_TYPES, rowsToSchema, schemaToRows } from "./schema";
 
 const EMPTY_ROW: AttrRow = { name: "", type: "string", description: "", required: false, nullable: false };
 
-/** Extractors (design §8): one extractor per document domain. Each has an
- * extraction prompt and a list of attributes to pull out — every attribute is a
- * field of the `data` schema, with the description that guides its extraction. */
+/** Extractors (design §8, alignment §6.1): each extractor targets one or more
+ * catalog object types (synced from promop) with optional per-object technique
+ * guidance; the prompt is composed from them. Older extractors authored a single
+ * `data` schema + prompt — those still open in the legacy editor. */
 export function ExtractorsPage() {
   const defs = usePromptDefinitions();
   const extractors = useMemo(() => defs.data?.filter((d) => d.kind === "extractor") ?? [], [defs.data]);
@@ -31,11 +41,15 @@ export function ExtractorsPage() {
   const def = extractors.find((d) => d.id === defId) ?? null;
   const versions = usePromptVersions(defId);
   const actions = usePromptActions(defId);
+  const catalog = useObjectTypes();
 
   const [selVersion, setSelVersion] = useState<PromptVersion | null>(null);
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState("");
   const [rows, setRows] = useState<AttrRow[]>([]);
+  const [objectTypes, setObjectTypes] = useState<string[]>([]);
+  const [guidance, setGuidance] = useState<Record<string, string>>({});
+  const [convert, setConvert] = useState(false); // a legacy draft being moved onto object types
 
   useEffect(() => {
     if (!versions.data?.length) return;
@@ -49,18 +63,41 @@ export function ExtractorsPage() {
     setPrompt(selVersion.prompt_text);
     setModel(selVersion.model);
     setRows(schemaToRows(selVersion.json_schema));
+    setObjectTypes(selVersion.object_types ?? []);
+    setGuidance(selVersion.guidance ?? {});
+    setConvert(false);
   }, [selVersion]);
 
   const isDraft = selVersion?.status === "draft";
+  const objectMode = !!selVersion && (isObjectTyped(selVersion) || convert);
   const setRow = (i: number, patch: Partial<AttrRow>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
+  // A published version extracts against its snapshot; a draft against the live catalog.
+  const definitions = useMemo<Record<string, ObjectType>>(() => {
+    const snap = selVersion?.object_type_snapshot ?? {};
+    if (Object.keys(snap).length) return snap;
+    return Object.fromEntries((catalog.data ?? []).map((o) => [o.key, o]));
+  }, [selVersion, catalog.data]);
+
   const onSave = () => {
     if (!selVersion) return;
-    actions.saveDraft.mutate(
-      { id: selVersion.id, prompt_text: prompt, model, json_schema: rowsToSchema(rows) },
-      { onSuccess: (v) => { setSelVersion(v); toast.success("Draft saved"); } },
-    );
+    const body = objectMode
+      ? {
+          id: selVersion.id,
+          model,
+          prompt_text: "",
+          json_schema: {},
+          object_types: objectTypes,
+          guidance: Object.fromEntries(objectTypes.filter((k) => guidance[k]?.trim()).map((k) => [k, guidance[k]])),
+        }
+      : { id: selVersion.id, prompt_text: prompt, model, json_schema: rowsToSchema(rows) };
+    actions.saveDraft.mutate(body, {
+      onSuccess: (v) => {
+        setSelVersion(v);
+        toast.success("Draft saved");
+      },
+    });
   };
 
   return (
@@ -68,8 +105,8 @@ export function ExtractorsPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Extractors</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Each extractor pulls structured attributes from a document domain. Edit the extraction prompt
-          and the attributes to extract, then publish a new version.
+          Each extractor pulls facts of the object types you pick — measurements, conditions, drugs, procedures,
+          observations — whose fields come from promop. Add extraction guidance per type, then publish a new version.
         </p>
       </div>
 
@@ -90,9 +127,7 @@ export function ExtractorsPage() {
                 }
               >
                 <span className="font-mono">{d.key}</span>
-                <span className="text-xs text-muted-foreground">
-                  {d.domain} · v{d.active_version?.version ?? "—"}
-                </span>
+                <span className="text-xs text-muted-foreground">v{d.active_version?.version ?? "—"}</span>
               </button>
             ))}
             {extractors.length === 0 && (
@@ -115,7 +150,13 @@ export function ExtractorsPage() {
                 <TabsTrigger value="editor">{humanize(def.key)}</TabsTrigger>
                 <TabsTrigger value="testset">Test Set</TabsTrigger>
               </TabsList>
-              <Badge variant="outline">{def.domain}</Badge>
+              {selVersion && objectMode
+                ? objectTypes.map((k) => (
+                    <Badge key={k} variant="outline" className="font-mono">
+                      {k}
+                    </Badge>
+                  ))
+                : def.domain && <Badge variant="outline">{def.domain} · legacy schema</Badge>}
             </div>
 
             <TabsContent value="editor" className="mt-4">
@@ -131,8 +172,30 @@ export function ExtractorsPage() {
                 canSave={isDraft}
               />
 
-              {selVersion && (
+              {selVersion && objectMode && (
+                <ObjectTypesEditor
+                  catalog={catalog.data}
+                  definitions={definitions}
+                  selected={objectTypes}
+                  guidance={guidance}
+                  editable={isDraft}
+                  onSelectedChange={setObjectTypes}
+                  onGuidanceChange={(k, text) => setGuidance((g) => ({ ...g, [k]: text }))}
+                />
+              )}
+
+              {selVersion && !objectMode && (
                 <>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed p-2.5 text-xs text-muted-foreground">
+                    <span>
+                      This version uses a hand-written schema. New versions should pick catalog object types instead.
+                    </span>
+                    {isDraft && (
+                      <Button size="sm" variant="outline" onClick={() => setConvert(true)}>
+                        Use object types
+                      </Button>
+                    )}
+                  </div>
                   <div className="space-y-1.5">
                     <Label>Extraction prompt</Label>
                     <Textarea
@@ -244,7 +307,11 @@ export function ExtractorsPage() {
                       author it here.
                     </p>
                   </div>
+                </>
+              )}
 
+              {selVersion && (
+                <>
                   <div className="space-y-1.5">
                     <Label>Model</Label>
                     <Input

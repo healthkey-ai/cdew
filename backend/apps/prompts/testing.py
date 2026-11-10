@@ -34,7 +34,11 @@ _LAB_RE = re.compile(r"([A-Za-z][A-Za-z ]+?)\s+([\d.]+)\s*([A-Za-z/%µ]+)")
 def canned_facts(version, text, *, model=None, document=None) -> list[dict]:
     """Deterministic fact extraction for tests: regex labs, keyword genetics.
     Emits real char offsets + snippets so span resolution succeeds. Accepts
-    ``document`` (the multimodal original, #84) for signature compatibility."""
+    ``document`` (the multimodal original, #84) for signature compatibility.
+    Object-typed versions get tagged ``measurement`` facts; legacy versions get
+    the old json_schema payloads."""
+    if getattr(version, "is_object_typed", False):
+        return _canned_measurements(version, text)
     key = version.definition.key
     facts: list[dict] = []
     if key == "lab_report":
@@ -61,4 +65,33 @@ def canned_facts(version, text, *, model=None, document=None) -> list[dict]:
                         },
                     }
                 )
+    return facts
+
+
+def _canned_measurements(version, text) -> list[dict]:
+    facts: list[dict] = []
+    if "measurement" not in version.object_types:
+        return facts
+    if version.definition.key == "genetics_report":
+        for token in ("del(17p)", "t(4;14)"):
+            idx = text.find(token)
+            if idx != -1:
+                facts.append({
+                    "object_type": "measurement",
+                    "data": {"measurement_source_value": token, "value_as_string": "positive"},
+                    "provenance": {"page": 0, "char_start": idx, "char_end": idx + len(token),
+                                   "snippet": token, "confidence": 0.95},
+                })
+        return facts
+    for m in _LAB_RE.finditer(text):
+        facts.append({
+            "object_type": "measurement",
+            "data": {
+                "measurement_source_value": m.group(1).strip(),
+                "value_as_number": float(m.group(2)),
+                "unit_source_value": m.group(3),
+            },
+            "provenance": {"page": 0, "char_start": m.start(), "char_end": m.end(),
+                           "snippet": m.group(0), "confidence": 0.9},
+        })
     return facts

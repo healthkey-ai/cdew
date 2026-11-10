@@ -87,6 +87,47 @@ class ReviewApiTests(APITestCase):
         assert body["provenance"]["source"] == "reviewer"
         assert self.doc.text.content[body["provenance"]["char_start"]:body["provenance"]["char_end"]] == "Sodium 140 mmol/L"
 
+    def test_add_manual_object_typed_fact(self):
+        r = self.client.post(
+            "/api/v1/extractions/",
+            {"document": self.doc.id, "object_type": "measurement", "snippet": "Sodium 140 mmol/L",
+             "payload": {"measurement_source_value": "Sodium", "value_as_number": 140,
+                         "unit_source_value": "mmol/L", "range_low": None}},
+            format="json",
+        )
+        assert r.status_code == 201, r.content
+        assert (r.json()["object_type"], r.json()["domain"]) == ("measurement", "measurement")
+        assert r.json()["payload"] == {"measurement_source_value": "Sodium", "value_as_number": 140,
+                                       "unit_source_value": "mmol/L"}
+
+    def test_manual_object_typed_fact_is_checked_against_the_catalog(self):
+        def add(object_type, payload):
+            return self.client.post(
+                "/api/v1/extractions/",
+                {"document": self.doc.id, "object_type": object_type, "snippet": "Sodium 140 mmol/L",
+                 "payload": payload},
+                format="json",
+            )
+
+        assert add("genome_magic", {"x": 1}).status_code == 400
+        assert add("measurement", {"test_name": "Sodium"}).status_code == 400  # not a measurement field
+        assert add("measurement", {"value_as_number": 140}).status_code == 400  # primary field missing
+
+    def test_review_list_ordered_by_object_type_then_position(self):
+        def fact(object_type, snippet):
+            idx = self.doc.text.content.find(snippet)
+            return ExtractionRecord.objects.create(
+                document=self.doc, extractor_key="x", object_type=object_type, domain=object_type,
+                payload={}, provenance={"char_start": idx, "char_end": idx + len(snippet), "snippet": snippet},
+                extractor_version_id=1, status=ExtractionStatus.STAGED,
+            )
+
+        sodium = fact("measurement", "Sodium 140 mmol/L")
+        hgb = fact("measurement", "Hemoglobin 9.1 g/dL")
+        cond = fact("condition", "Hemoglobin")
+        r = self.client.get(f"/api/v1/documents/{self.doc.id}/extractions/")
+        assert [f["id"] for f in r.json()] == [cond.id, hgb.id, sodium.id]
+
     def test_add_manual_fact_snippet_not_found(self):
         r = self.client.post(
             "/api/v1/extractions/",

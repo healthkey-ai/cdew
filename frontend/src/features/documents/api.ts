@@ -43,6 +43,7 @@ export interface ExtractionRecord {
   id: number;
   document: number;
   extractor_key: string;
+  object_type: string; // catalog object type (#96); "" for legacy-extractor facts
   domain: string;
   payload: Record<string, unknown>;
   provenance: {

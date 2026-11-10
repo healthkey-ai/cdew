@@ -1,7 +1,8 @@
-"""Pydantic AI classifier agent (design §10).
+"""Pydantic AI agents (design §10): the classifier and the extractors.
 
 Materializes a classifier `PromptVersion` into a Pydantic AI agent that scores
-each taxonomy type independently. Model is per-version-overridable and
+each taxonomy type independently, and an extractor version into one whose
+output is the facts/provenance envelope. Model is per-version-overridable and
 configurable per environment (Vertex staging/prod, GLA dev). Tests pass a
 `TestModel`/`FunctionModel` as `model` to run hermetically.
 """
@@ -191,24 +192,55 @@ def _extraction_input(version, text: str, document: dict | None):
 
 
 def build_extraction_output_model(version):
-    """Compile the version's data schema and wrap it in the fixed facts/provenance
-    envelope (design §8). Returns the ExtractionOutput Pydantic class."""
+    """The extractor's output type, inside the fixed facts/provenance envelope
+    (design §8).
+
+    Object-typed (alignment §4.3, #96): ``facts`` is a discriminated union keyed by
+    ``object_type`` over the version's object types, each fact's ``data`` compiled
+    from that type's ``source_schema``. A fact failing its own type's schema, or
+    lacking provenance, fails validation and is retried — the §3 hard rule, per
+    object type. Legacy: one authored ``json_schema`` for every fact.
+    """
+    from typing import Annotated, Literal, Union
+
+    from pydantic import create_model
+
     from .schema import compile_model
 
     key = version.definition.key
-    data_model = compile_model(version.json_schema, name=f"{key}_data")
-    from pydantic import create_model
+    if not version.is_object_typed:
+        data_model = compile_model(version.json_schema, name=f"{key}_data")
+        fact = create_model(f"{key}_fact", data=(data_model, ...), provenance=(ExtractProvenance, ...))
+        return create_model(f"{key}_output", facts=(list[fact], Field(default_factory=list)))
 
-    fact = create_model(f"{key}_fact", data=(data_model, ...), provenance=(ExtractProvenance, ...))
-    return create_model(f"{key}_output", facts=(list[fact], Field(default_factory=list)))
+    definitions = version.object_type_definitions()
+    if not definitions:
+        raise ValueError("no object type definitions for this version")
+    facts = [
+        create_model(
+            f"{key}_{d['key']}_fact",
+            object_type=(Literal[d["key"]], ...),
+            data=(compile_model(d["source_schema"], name=f"{key}_{d['key']}_data"), ...),
+            provenance=(ExtractProvenance, ...),
+        )
+        for d in definitions
+    ]
+    item = facts[0] if len(facts) == 1 else Annotated[Union[tuple(facts)], Field(discriminator="object_type")]
+    return create_model(f"{key}_output", facts=(list[item], Field(default_factory=list)))
 
 
 def _extraction_system_prompt(version) -> str:
+    if version.is_object_typed:
+        from .compose import compose_extraction_prompt
+
+        composed = compose_extraction_prompt(version.object_type_definitions(), version.guidance)
+        return f"{composed}\n\n{_PROVENANCE_INSTRUCTIONS}"
     return f"{version.prompt_text.strip()}\n\n{_PROVENANCE_INSTRUCTIONS}"
 
 
 def extract_facts(version, text: str, *, model=None, document: dict | None = None) -> list[dict]:
-    """Run the extractor agent; return facts as plain dicts ({data, provenance}).
+    """Run the extractor agent; return facts as plain dicts ({object_type, data,
+    provenance} for object-typed versions, {data, provenance} for legacy ones).
 
     When ``document`` (``{"data": bytes, "media_type": str}``) is a PDF/image, the
     ORIGINAL document is sent to the (multimodal) model instead of the flattened

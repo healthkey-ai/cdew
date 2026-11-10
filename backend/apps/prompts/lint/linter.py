@@ -206,11 +206,43 @@ def lint_prompt(prompt_text, kind):
     return findings
 
 
-def lint_version(kind, *, prompt_text="", json_schema=None, taxonomy=None, domain="", commit_enabled=False):
+def lint_object_types(object_types, guidance, known_object_types, prompt_text=""):
+    """An object-typed extractor (alignment §4.2, schema-lint §5a): a non-empty set of
+    known catalog keys, and guidance only for those keys. The fields themselves are
+    the catalog's (synced from promop), so there is no authored schema to lint."""
+    findings = []
+    if not isinstance(object_types, list) or not object_types:
+        findings.append(Finding("error", "E070", "object_types", "select at least one object type"))
+        return findings
+    seen = set()
+    for i, key in enumerate(object_types):
+        if key in seen:
+            findings.append(Finding("error", "E072", f"object_types[{i}]", f"object type '{key}' is selected twice"))
+        elif key not in known_object_types:
+            known = ", ".join(sorted(known_object_types)) or "none synced"
+            findings.append(Finding("error", "E071", f"object_types[{i}]", f"unknown object type '{key}' (known: {known})"))
+        seen.add(key)
+    for key, text in (guidance or {}).items():
+        if not isinstance(text, str):
+            findings.append(Finding("error", "E072", f"guidance.{key}", "guidance must be text"))
+        elif key not in seen and text.strip():
+            findings.append(Finding("warning", "W170", f"guidance.{key}", f"guidance for unselected object type '{key}' is ignored"))
+    if (prompt_text or "").strip():
+        findings.append(Finding("warning", "W172", "prompt",
+                                "the extraction prompt is composed from the catalog; prompt text is ignored — use per-object guidance"))
+    return findings
+
+
+def lint_version(kind, *, prompt_text="", json_schema=None, taxonomy=None, domain="", commit_enabled=False,
+                 object_types=None, guidance=None, known_object_types=()):
     findings = list(lint_prompt(prompt_text, kind))
     if kind == "classifier":
         findings += lint_taxonomy(taxonomy or [])
+    elif object_types or not json_schema:
+        findings += lint_object_types(object_types or [], guidance or {}, set(known_object_types), prompt_text)
     else:
         findings += lint_extractor_schema(json_schema or {}, domain, commit_enabled)
+        findings.append(Finding("warning", "W171", "data",
+                                "legacy json_schema extractor — select catalog object types instead (alignment §4.2)"))
     errors = [f for f in findings if f.level == "error"]
     return LintResult(ok=not errors, findings=findings)

@@ -508,6 +508,8 @@ source/raw subset + required fields) derived from promop, plus `field_guide` and
 ### 4.2 Changed: `PromptDefinition` / `PromptVersion` (extractors)
 - Replace the single `domain` + `json_schema` with **`object_types: [key, …]`** — the set an
   extractor targets (one or many; user's choice).
+  - *As built (P1, 2026-11-10):* `object_types` sits on the **version**, so changing the target set
+    is versioned like any other content change. See `implementation-plan.md` → *P0–P2 as built*.
 - Each `PromptVersion` **snapshots** the referenced object types' definitions (see §9,
   reproducibility) and holds the **per-object guidance + optional extra source
   fields**, validated against the snapshot, not free-form.

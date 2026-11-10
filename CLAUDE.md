@@ -26,6 +26,7 @@ Backend (`cd backend`, venv active):
 - `pytest apps/pipeline/tests.py::ClassName::test_name` — single test. Test files match `tests.py`, `test_*.py`, `*_tests.py` under `apps/`.
 - `make lint` / `make fmt` — `ruff check .` / `ruff format .`
 - `python manage.py bootstrap_dev --email you@x.org --roles admin,prompt_author,reviewer` — creates an Identity + role grants, prints a JWT for local API calls.
+- `python manage.py sync_object_types [--fixture | --file F | --dry-run | --save-fixture]` — refresh the object catalog from promop's OpenAPI (`PROMOP_BASE_URL`); migrations seed it from the captured fixture.
 - Real (non-test) runs need Postgres. With no `DATABASE_URL`, Django uses `postgres:///cdew` (local socket, OS user) — `createdb cdew` once. See README for the Docker option.
 
 Full stack in Docker (repo root): `docker compose up -d --build` — frontend :5173, api :8000,
@@ -52,7 +53,7 @@ Pydantic AI) for LLM calls. Reuses hk-labs patterns but is a separate service wi
 - **`accounts`** — hybrid auth (design §11). `Identity` is `AUTH_USER_MODEL` (currently vendored; slated to come from the shared `hk-identity` package). **Role grants are local**: `RoleAssignment` + `Role` enum (`reviewer` / `prompt_author` / `admin`). Gate views with `permissions.py` (`IsReviewer` / `IsPromptAuthor` / `IsAdmin`; admins pass every gate). Bearer auth flows through `PartnerAuthentication` (pluggable providers, empty by default) then SimpleJWT.
 - **`documents`** — `SourceDocument` (immutable original, sha256 dedup per patient) + `DocumentText` (parsed text, versioned by parser). `ingest.py`, `parsing.py` (markitdown). Also owns the **review** surface (`review.py`, `review_urls.py`, mounted at `/api/v1/extractions/`, reviewer-gated).
 - **`pipeline`** — the orchestrator. `ExtractionJob` is the UI's source of truth for progress (status/stage/progress/errors). `ExtractionRecord` holds staged/approved facts + provenance.
-- **`prompts`** — DB-backed, versioned prompt/schema registry (design §8). `PromptDefinition` (a `classifier` or an `extractor`, with `active_version`) + `PromptVersion` (immutable once published: `prompt_text`, `json_schema`, `taxonomy`, `model`, `params`). `PromptTestSample` for dry-runs.
+- **`prompts`** — DB-backed, versioned prompt/schema registry (design §8). `PromptDefinition` (a `classifier` or an `extractor`, with `active_version`) + `PromptVersion` (immutable once published: `prompt_text`, `taxonomy`, `model`, `params`; extractors: `object_types` + `guidance` + publish-time `object_type_snapshot`, or a legacy `json_schema`). `PromptTestSample` for dry-runs. **`ObjectType`** is the object catalog (promop alignment P0) — synced from promop's OpenAPI by `manage.py sync_object_types` (`catalog.py`; captured fixture for tests/seed), never author-edited.
 
 ### The pipeline (the spine)
 
@@ -85,6 +86,15 @@ Key invariants when touching this:
   **fixed, system-owned `facts[]` + `provenance` envelope** — authors never write provenance, so it
   can't be authored wrong. Because provenance fields are *required*, a fact the model can't ground
   **fails validation and is never staged-as-clean** (the design §3 hard rule, enforced by the type).
+- **Object-typed extractors** (promop alignment P2):
+  - **Output.** `build_extraction_output_model` builds a **discriminated union** on `object_type`
+    over the version's catalog types, each type's `data` compiled from its `source_schema`.
+  - **Prompt.** The system prompt comes from `compose.compose_extraction_prompt`. It is pure and
+    golden-tested; keep it that way. Its `relevance` argument stays `None` until P2b.
+  - **Wording.** Never normalize extracted `*_source_value` wording beyond whitespace; promop's
+    curators own synonyms.
+  - **Context.** The extract stage takes one `ExtractionContext`; add new run inputs there, not as
+    new positional arguments.
 - Model selection is per-environment: `GEMINI_BACKEND=vertex` → `google-vertex:` (staging/prod, BAA)
   vs `gla` → `google-gla:` (dev, API key). Global default `LLM_MODEL`, overridable per
   `PromptVersion.model`.

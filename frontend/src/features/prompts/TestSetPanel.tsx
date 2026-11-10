@@ -16,10 +16,12 @@ import { useDocuments } from "@/features/documents/api";
 import { cn } from "@/lib/utils";
 import {
   type DryRunFact,
+  factRow,
   type PromptDefinition,
   type PromptVersion,
   type TestSample,
   useDryRunJobs,
+  useObjectTypes,
   useTestSampleActions,
   useTestSamples,
 } from "./api";
@@ -161,11 +163,14 @@ function factsTable(
 type FactRow = Record<string, unknown>;
 type FactPair = { ex?: FactRow; exp?: FactRow; kind: "same" | "changed" | "extra" | "missing" };
 
-/** Stable stringify (object keys sorted) so equality is order-of-keys independent. */
+/** Stable stringify (object keys sorted, null fields dropped) so equality is
+ * order-of-keys independent and an unset field equals an absent one — as the
+ * backend's dry-run compare does. */
 const stable = (o: unknown) =>
   JSON.stringify(o, (_k, v) =>
     v && typeof v === "object" && !Array.isArray(v)
       ? Object.keys(v as object)
+          .filter((k) => (v as Record<string, unknown>)[k] != null)
           .sort()
           .reduce((a, k) => ({ ...a, [k]: (v as Record<string, unknown>)[k] }), {})
       : v,
@@ -340,6 +345,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
   const samples = useTestSamples(def.id);
   const sactions = useTestSampleActions(def.id);
   const docs = useDocuments();
+  const catalog = useObjectTypes();
   // Async dry-run/extract (#55): submit jobs to Prefect and poll; concurrent
   // per-row jobs supported. `local` dispatch runs inline (job comes back done).
   const dryRun = useDryRunJobs(
@@ -372,14 +378,17 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
     () => (isClassifier ? ((version?.taxonomy as { type: string }[] | undefined)?.map((t) => t.type) ?? []) : []),
     [isClassifier, version],
   );
-  // The extractor's "attributes to extract" (schema properties) → result columns.
-  const attrs = useMemo(
-    () =>
-      isClassifier
-        ? []
-        : Object.keys((version?.json_schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}),
-    [isClassifier, version],
-  );
+  // The extractor's fields → result columns: `object_type` + every selected object
+  // type's catalog fields (snapshot when published), or a legacy schema's properties.
+  const attrs = useMemo(() => {
+    if (isClassifier || !version) return [];
+    if (version.object_types?.length) {
+      const live = Object.fromEntries((catalog.data ?? []).map((o) => [o.key, o]));
+      const defs = version.object_types.map((k) => version.object_type_snapshot?.[k] ?? live[k]).filter(Boolean);
+      return ["object_type", ...new Set(defs.flatMap((d) => Object.keys(d.source_schema.properties)))];
+    }
+    return Object.keys((version.json_schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {});
+  }, [isClassifier, version, catalog.data]);
   const parsedDocs = useMemo(() => (docs.data?.results ?? []).filter((d) => d.has_text), [docs.data]);
   const docItems = useMemo(
     () => Object.fromEntries(parsedDocs.map((d) => [String(d.id), d.original_filename || `doc#${d.id}`])),
@@ -406,7 +415,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       return routed.size === exp.size && [...routed].every((t) => exp.has(t));
     }
     // Order-insensitive: extracted facts are an unordered bag, compared as a multiset.
-    const facts = (extractedFacts(s) ?? []).map((f) => f.data);
+    const facts = (extractedFacts(s) ?? []).map(factRow);
     return factsEqual(facts, (s.expected_payload as FactRow[]) ?? []);
   };
 
@@ -449,7 +458,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
       toast.error("Extract this document first");
       return;
     }
-    const expected = facts.map((f) => f.data);
+    const expected = facts.map(factRow);
     sactions.update.mutate(
       { id: s.id, expected_payload: expected },
       {
@@ -588,7 +597,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
               const expectedArr = Array.isArray(s.expected_payload) ? (s.expected_payload as unknown[]) : null;
               const routedCount = (s.extracted_payload as { routed_types?: string[] } | null)?.routed_types?.length;
               const diffCount = showDiff
-                ? alignFacts(facts?.map((f) => f.data) ?? [], (s.expected_payload as FactRow[]) ?? [], attrs).filter(
+                ? alignFacts(facts?.map(factRow) ?? [], (s.expected_payload as FactRow[]) ?? [], attrs).filter(
                     (p) => p.kind !== "same",
                   ).length
                 : 0;
@@ -612,7 +621,11 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                     className="h-64 font-mono text-xs"
                     value={expectedText}
                     onChange={(e) => setExpectedText(e.target.value)}
-                    placeholder={isClassifier ? '["lab_report"]' : '[{ "test_name": "…" }]'}
+                    placeholder={
+                      isClassifier
+                        ? '["lab_report"]'
+                        : '[{ "object_type": "measurement", "measurement_source_value": "…" }]'
+                    }
                   />
                   <TipButton
                     tip="Save this Expected value as the document's gold to compare future extractions against"
@@ -783,7 +796,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                     <p className="text-xs text-muted-foreground">No facts extracted.</p>
                                   ) : (
                                     factsTable(
-                                      facts.map((f) => f.data),
+                                      facts.map(factRow),
                                       attrs,
                                       cols,
                                       facts.map((f) => f.snippet),
@@ -792,7 +805,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                 </TabsContent>
                                 <TabsContent value="json" className="mt-2">
                                   <pre className="max-h-72 overflow-auto rounded-md bg-background p-2 font-mono text-xs">
-                                    {JSON.stringify(facts?.map((f) => f.data) ?? [], null, 2)}
+                                    {JSON.stringify(facts?.map(factRow) ?? [], null, 2)}
                                   </pre>
                                 </TabsContent>
                               </Tabs>
@@ -805,7 +818,7 @@ export function TestSetPanel({ def, version }: { def: PromptDefinition; version:
                                   correct the Expected value.
                                 </p>
                                 {diffTable(
-                                  facts?.map((f) => f.data) ?? [],
+                                  facts?.map(factRow) ?? [],
                                   (s.expected_payload as Record<string, unknown>[]) ?? [],
                                   attrs,
                                   cols,

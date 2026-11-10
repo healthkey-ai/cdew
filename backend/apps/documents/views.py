@@ -181,9 +181,10 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=["get"])
     def extractions(self, request, pk=None):
+        from .review import review_order
+
         doc = self.get_object()
-        qs = doc.extractions.all().order_by("extractor_key", "id")
-        return Response(ExtractionRecordSerializer(qs, many=True).data)
+        return Response(ExtractionRecordSerializer(review_order(doc.extractions.all()), many=True).data)
 
     @action(detail=True, methods=["get", "post"])
     def geometry(self, request, pk=None):

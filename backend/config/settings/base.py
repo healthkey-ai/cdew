@@ -326,6 +326,11 @@ PARTNER_AUTH_CACHE_TTL = env.int("PARTNER_AUTH_CACHE_TTL", default=60)
 PARTNER_AUTH_JWKS_CACHE_TTL = env.int("PARTNER_AUTH_JWKS_CACHE_TTL", default=3600)
 PARTNER_AUTH_LOGIN_TIMEOUT = env.int("PARTNER_AUTH_LOGIN_TIMEOUT", default=10)
 PATIENT_DIRECTORY_TIMEOUT = env.int("PATIENT_DIRECTORY_TIMEOUT", default=10)
+
+# promop's base URL (e.g. https://promop-staging.onrender.com). Read by
+# `manage.py sync_object_types` for the object catalog (#94); the promop service
+# client (P2a/PL) will use it too.
+PROMOP_BASE_URL = env("PROMOP_BASE_URL", default="")
 # Org-owned Firebase (FirebaseTokenProvider). FIREBASE_WEB_CONFIG is the public
 # web config ({apiKey, authDomain, projectId, …}) the login page uses for Google
 # sign-in; the service account (if any) is FIREBASE_CREDENTIALS_JSON.

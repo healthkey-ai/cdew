@@ -43,7 +43,7 @@ def extract_one_task(doc_id: int, definition_id: int) -> int:
     from apps.documents.models import SourceDocument
     from apps.prompts.models import PromptDefinition
 
-    from .extract import run_extractor
+    from .extract import ExtractionContext, run_extractor
 
     try:
         doc = SourceDocument.objects.get(id=doc_id)
@@ -51,7 +51,9 @@ def extract_one_task(doc_id: int, definition_id: int) -> int:
         version = definition.active_version
         if version is None:
             return 0
-        return len(run_extractor(doc, definition, version, doc.text.content))
+        # Tasks take ids (Prefect serializes arguments); P2b passes its pinned
+        # relevance snapshot id here and rebuilds the context the same way.
+        return len(run_extractor(ExtractionContext(document=doc), definition, version))
     except Exception as exc:
         logger.warning("task: extract failed doc=%s def=%s err=%s", doc_id, definition_id, type(exc).__name__)
         raise RuntimeError("extract_failed") from None
@@ -80,11 +82,11 @@ class PrefectRunner:
     def classify(self, doc) -> list[str]:
         return classify_task(doc.id)
 
-    def extract(self, doc, routed_types) -> int:
+    def extract(self, context) -> int:
         from apps.prompts.resolve import resolve_extractors
 
-        definitions = [d for d in resolve_extractors(routed_types) if d.active_version_id]
-        futures = [extract_one_task.submit(doc.id, d.id) for d in definitions]
+        definitions = [d for d in resolve_extractors(context.routed_types) if d.active_version_id]
+        futures = [extract_one_task.submit(context.document.id, d.id) for d in definitions]
         return sum(f.result() for f in futures)
 
 

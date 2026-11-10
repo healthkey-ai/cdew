@@ -305,6 +305,17 @@ reproducible.
   published. The full rule set and error/warning codes are in
   [`schema-lint.md`](./schema-lint.md); a bad schema can't silently break the agent or the future
   commit mapping.
+- **Object-typed extractors** *(promop alignment P0–P2, 2026-11-10)* replace authored schemas.
+  - **The catalog.** Fields come from the **object catalog** (`ObjectType`: measurement, condition,
+    drug, procedure, observation), synced from promop's OpenAPI by `manage.py sync_object_types`.
+  - **What the author does.** Selects 1..n object types on the version, optionally adding
+    per-object *extraction-technique* guidance.
+  - **What the system does.** It composes the prompt (`prompts/compose.py`) and builds a tagged-union
+    output: `facts[] = {object_type, data, provenance}`.
+  - **Publish** snapshots the selected types' definitions onto the version.
+  - **Legacy versions.** A version that still carries a `json_schema` keeps working.
+  - Full design: [`promop-alignment.md`](./promop-alignment.md) §3–§7; as built:
+    [`implementation-plan.md`](./implementation-plan.md) → *P0–P2 as built*.
 
 ### 8.2 Runtime resolution & reproducibility
 
@@ -353,9 +364,11 @@ draft (optionally cloning a version); `PATCH` a draft (blocked once published); 
 
 > **As built (v1):** the admin app is a routed SPA and the "Prompts" area ships as two role-gated
 > pages rather than one tabbed screen — **Taxonomies** (the classifier: prompt + editable
-> `type / prompt / threshold` rows) and **Extractors** (per-extractor prompt + the `data` schema
-> edited as structured `name / type / description / required / nullable` **attribute rows**, not raw
-> JSON — the system still owns the `facts`/`provenance` envelope). Both share one version-lifecycle
+> `type / prompt / threshold` rows) and **Extractors**. An extractor version picks catalog
+> **object types** and adds optional per-object guidance; the fields shown read-only come from the
+> catalog. Legacy versions keep the old editor: a prompt plus the `data` schema as
+> `name / type / description / required / nullable` **attribute rows**. Either way the system owns
+> the `facts` / `provenance` envelope. Both share one version-lifecycle
 > toolbar (draft → validate → dry-run → publish → activate). The full tabbed editor + version-diff
 > polish is tracked in [`TODO.md`](../TODO.md).
 

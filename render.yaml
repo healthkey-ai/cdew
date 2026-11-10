@@ -85,6 +85,10 @@ services:
       - key: DOCAI_ENABLED
         value: "False"               # Google Document AI; off without GCP
 
+      # ── promop (object catalog sync, promop alignment P0) ────────────────
+      - key: PROMOP_BASE_URL
+        value: https://promop-staging.onrender.com
+
       # ── Staff sign-in (#31 Part A) ──────────────────────────────────────
       - key: PARTNER_AUTH_PROVIDERS
         value: apps.accounts.providers.jwks.JwksTokenProvider,apps.accounts.providers.firebase.FirebaseTokenProvider

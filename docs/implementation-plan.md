@@ -328,9 +328,9 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 |---|---|---|---|---|
 | **D1** | **Patient identity design.** Staff act on behalf of patients (alignment §2.7, design §11.1). Promop-signed-in staff link existing patients via a promop picker using their own sign-in; phr- or Firebase-signed-in staff need a fallback (link to a promop account, a narrow service search, or email match); new patients go through `provision`; per-staff organization scope; on-behalf-of audit. The source hospital comes with the document. Decides the model, the migration of `patient_ref`, and the picker UX. | #112 | #31 (staff sign-in), promop#2405 | **Decide now**; blocks PL, P2b, P5 |
 | **Auth** | **Partner auth like hk-labs:** Firebase (org-owned IdP) + promop-hosted family tokens via `PartnerAuthentication`; `partner-token/` exchange; `Identity.sub` uniqueness fix; local roles | #31 | promop#2405 (optional audience check) | **Ready**, independent of the extraction work |
-| **P0** | `ObjectType` catalog + `sync_object_types` (OpenAPI → source schemas; `promop_endpoint`, not `fhir_resource`) | #94 | — | **Ready** |
-| **P1** | `PromptDefinition.object_types`, `PromptVersion` snapshots; migrate `lab_report` / `genetics_report` (+ test samples) | #95 | P0 | **Ready** |
-| **P2** | Prompt composer + tagged-union output; `ExtractionRecord.object_type`; the seams below | #96 | P1 | **Ready** |
+| **P0** | `ObjectType` catalog + `sync_object_types` (OpenAPI → source schemas; `promop_endpoint`, not `fhir_resource`) | #94 | — | ✅ **Built** (see *P0–P2 as built*) |
+| **P1** | Object types on the extractor version, publish-time snapshots; migrate `lab_report` / `genetics_report` (+ test samples) | #95 | P0 | ✅ **Built** |
+| **P2** | Prompt composer + tagged-union output; `ExtractionRecord.object_type`; the seams below | #96 | P1 | ✅ **Built** |
 | **P3 / P4** | Taxonomy from promop `doc_type`; lint REGISTRY → synced schemas (absorbs #37's commit gate) | #97, #98, #37 | P0 | **Ready** |
 | **Ad-hoc** | Per-document object selection on a transient version | #114 | P2 | Ready after P2 |
 | **PL** | Patient link: `patient_ref → person_id` via `persons/provision`, at route time | #113 | D1, promop service token | After D1 |
@@ -340,7 +340,7 @@ dependency for term resolution and disease relevance has shipped** (promop#1971,
 | **G** | Genomics: the `genomic_variant` object (extraction and staging) + the gated genomics adapter (commit). Contract: `docs/genomics-integration.md` | #101 (merged) | Extraction after P0/P1; commit needs promop#1245 | Extraction **ready after P1**; commit **blocked on promop** |
 
 **Order:**
-- **Now:** P0 → P1 → P2. D1 can be decided in parallel, since it is design work only.
+- **Done:** P0 → P1 → P2. D1 can be decided in parallel, since it is design work only.
 - **Then:** P3, P4 and ad-hoc in any order.
 - **Then:** PL → P2a → P2b → P5.
 - **Last:** G, once promop#348 and #1245 land.
@@ -357,6 +357,57 @@ concept ids.
    (#31 Part C replaces the GCP plan in #4–#14). Locally, promop's own docker-compose can run next
    to CDEW's.
 4. **BAA (#102)** executed before real PHI reaches Vertex or promop.
+
+### P0–P2 as built  *(2026-11-10)*
+
+**P0 — catalog (#94).**
+- `prompts.ObjectType`: `measurement`, `condition`, `drug`, `procedure`, `observation`.
+- **Fields** come from promop's OpenAPI. Each `promop_endpoint`'s POST request schema is filtered to
+  the source/raw subset (`catalog.is_source_field`). The result matches alignment §3.3 exactly, plus
+  the extraction-only `specimen` (seam 7).
+- **Words around the fields** are CDEW's: labels, per-field hints and default guidance, in
+  `catalog.OVERLAY`.
+- **`manage.py sync_object_types`** reads `PROMOP_BASE_URL`, `--file` or `--fixture`.
+  - It reports new, changed and dropped types, and fields that have no hint yet.
+  - A type promop no longer publishes is kept, not deleted.
+  - `--save-fixture` refreshes the captured fixture
+    (`prompts/fixtures/promop_openapi.json`). Migration 0008 seeds the catalog from that fixture, so
+    CI and new environments never call promop.
+- **`promop_schema_version`** is a fingerprint of each request schema, because promop's
+  `info.version` is a static `1.0.0`.
+- **Extraction vs commit required-ness.**
+  - The extraction schema requires only the primary `*_source_value`.
+  - promop's commit requirements (the anchor date) are kept in `commit_required`. Review flags them
+    when missing, so the model is never pushed to invent a date (alignment §3.3 note).
+
+**P1 — extractors target object types (#95).**
+- **On the version, not the definition.** `object_types` and `guidance` live on `PromptVersion`,
+  not `PromptDefinition` as alignment §4.2 sketched. Changing what an extractor targets is then a
+  new version like any other content change, and a published version can't be changed underneath
+  its facts.
+- **Snapshot at publish.** Publishing copies each type's definition into
+  `object_type_snapshot`; a draft runs on the live catalog.
+- **Lint:** E070–E072 and W170–W172 (`schema-lint.md` §5a).
+- **Migration 0009** publishes an object-typed v2 for the seeded extractors and makes it active. The
+  legacy v1 stays and is still runnable. Test-set gold is rewritten to `{object_type, ...fields}`
+  rows.
+  - `lab_report` → `["measurement"]`.
+  - `genetics_report` → `["measurement"]` with mapping guidance, as an interim step until
+    workstream G's `genomic_variant`.
+  - Extractors authored in the UI stay legacy until an author moves them ("Use object types").
+
+**P2 — composer and tagged union (#96).**
+- **`compose.compose_extraction_prompt`** is pure, pinned by goldens, and takes `relevance=None`
+  (seam 2).
+- **`build_extraction_output_model`** builds a discriminated union on `object_type`, with
+  provenance required per fact.
+- **Records.** `ExtractionRecord.object_type` is set from each fact; `domain` mirrors it.
+  `*_source_value` wording is kept verbatim, whitespace collapsed only (seam 8).
+- **Context.** `ExtractionContext(document, routed_types, relevance=None)` replaces positional
+  arguments (seam 3).
+- **Review order.** `review.review_order` is the single ordering point (seam 4).
+- **Review UI.** Object-typed facts show every catalog field and flag missing commit-required ones.
+  Manual facts pick an object type.
 
 ### Seams P0–P2 must leave for P2a / P2b
 P2a and P2b should plug in without reworking P0–P2. Concretely:

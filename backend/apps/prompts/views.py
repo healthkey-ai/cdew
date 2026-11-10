@@ -16,15 +16,26 @@ from apps.accounts.permissions import IsPromptAuthor
 from apps.pipeline.models import DryRunJob, JobStatus
 
 from .lint.linter import lint_version
-from .models import PromptDefinition, PromptKind, PromptTestSample, PromptVersion
+from .models import ObjectType, PromptDefinition, PromptKind, PromptTestSample, PromptVersion
 from .serializers import (
     DryRunJobSerializer,
+    ObjectTypeSerializer,
     PromptDefinitionSerializer,
     PromptTestSampleSerializer,
     PromptVersionSerializer,
 )
 
 logger = logging.getLogger("apps.prompts")
+
+
+class ObjectTypeViewSet(viewsets.ReadOnlyModelViewSet):
+    """The object catalog (alignment §3, #94), read-only: authors pick from it,
+    reviewers use its fields to add a fact. Synced from promop, never edited here."""
+
+    queryset = ObjectType.objects.all()
+    serializer_class = ObjectTypeSerializer
+    lookup_field = "key"
+    pagination_class = None
 
 
 class PromptDefinitionViewSet(viewsets.ModelViewSet):
@@ -54,6 +65,9 @@ class PromptDefinitionViewSet(viewsets.ModelViewSet):
             prompt_text=base.prompt_text if base else "",
             json_schema=base.json_schema if base else {},
             taxonomy=base.taxonomy if base else [],
+            # A draft extracts against the live catalog; publish snapshots it again.
+            object_types=base.object_types if base else [],
+            guidance=base.guidance if base else {},
             model=base.model if base else "gemini-2.5-flash",
             params=base.params if base else {},
             created_by=request.user if request.user.is_authenticated else None,
@@ -115,6 +129,9 @@ class PromptVersionViewSet(
             json_schema=version.json_schema,
             taxonomy=version.taxonomy,
             domain=d.domain,
+            object_types=version.object_types,
+            guidance=version.guidance,
+            known_object_types=ObjectType.objects.values_list("key", flat=True),
         )
 
     def update(self, request, *args, **kwargs):
@@ -136,7 +153,12 @@ class PromptVersionViewSet(
             return Response({"detail": "shape-lint failed", "lint": result.to_dict()}, status=400)
         version.status = "published"
         version.published_at = timezone.now()
-        version.save(update_fields=["status", "published_at"])
+        if version.is_object_typed:
+            # Pin the definitions it was tested on (alignment §9): a later catalog
+            # sync only affects versions published after it.
+            live = {o.key: o.definition() for o in ObjectType.objects.filter(key__in=version.object_types)}
+            version.object_type_snapshot = {k: live[k] for k in version.object_types}
+        version.save(update_fields=["status", "published_at", "object_type_snapshot"])
         definition = version.definition
         definition.active_version = version
         definition.save(update_fields=["active_version"])

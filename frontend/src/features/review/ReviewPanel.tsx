@@ -26,6 +26,7 @@ import {
   useGeometry,
   useTriggerGeometry,
 } from "@/features/documents/api";
+import { type ObjectType, useObjectTypes } from "@/features/prompts/api";
 import { isJobActive, useJobs } from "@/features/workflow/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -201,18 +202,26 @@ function DocumentImageView({
   );
 }
 
-const CATEGORIES = ["office_visit", "diagnosis_hrv", "labs", "biopsy", "imaging", "other"];
-
-// Fallback fields per type when the document has no existing fact of that type to
-// mirror. When it does, the Add-a-fact form uses that fact's field set instead.
-const FIELD_TEMPLATES: Record<string, string[]> = {
-  labs: ["test_name", "value", "unit", "ref_low", "ref_high", "abnormal_flag", "collected_date"],
-  imaging: ["modality", "body_site", "finding", "impression"],
-  office_visit: ["assessment", "plan"],
-  diagnosis_hrv: ["condition", "status", "date"],
-  biopsy: ["site", "diagnosis", "result"],
-  other: ["name", "value"],
+/** A catalog field's base JSON type ("number", "integer", "string", …). */
+const fieldType = (ot: ObjectType, key: string) => {
+  const t = ot.source_schema.properties[key]?.type;
+  return Array.isArray(t) ? t.find((x) => x !== "null") ?? "string" : t ?? "string";
 };
+
+/** Raw form strings → an object-typed fact's data: typed by the catalog, blanks
+ * left out (an unset field is absent, as the pipeline stores it). */
+function coerceByCatalog(ot: ObjectType, raw: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (v.trim() === "") continue;
+    const t = fieldType(ot, k);
+    out[k] = (t === "number" || t === "integer") && !Number.isNaN(Number(v)) ? Number(v) : v;
+  }
+  return out;
+}
+
+const sortedJson = (o: Record<string, unknown>) =>
+  JSON.stringify(Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b))));
 
 function statusBadge(status: string): { variant: "secondary" | "destructive" | "outline"; className?: string } {
   if (status === "approved") return { variant: "secondary", className: "text-success" };
@@ -225,6 +234,7 @@ function statusBadge(status: string): { variant: "secondary" | "destructive" | "
  * Selecting the card highlights its provenance on the document. */
 function FactCard({
   fact,
+  objectType,
   active,
   saving,
   showNotLocated,
@@ -234,6 +244,7 @@ function FactCard({
   onReject,
 }: {
   fact: ExtractionRecord;
+  objectType?: ObjectType; // the fact's catalog object type (#96); absent for legacy facts
   active: boolean;
   saving: boolean;
   showNotLocated: boolean;
@@ -243,12 +254,14 @@ function FactCard({
   onReject: () => void;
 }) {
   // Edit as raw strings so partial input (e.g. "1." while typing "1.5") is
-  // preserved; coerce back to the payload's field types only for the dirty
-  // check and save.
-  const [draft, setDraft] = useState<Record<string, string>>(() =>
-    Object.fromEntries(Object.entries(fact.payload).map(([k, v]) => [k, v == null ? "" : String(v)])),
-  );
+  // preserved; coerce back to the field types only for the dirty check and save.
+  // An object-typed fact shows every catalog field, so a reviewer can fill one in.
+  const [draft, setDraft] = useState<Record<string, string>>(() => {
+    const keys = objectType ? Object.keys(objectType.source_schema.properties) : Object.keys(fact.payload);
+    return Object.fromEntries(keys.map((k) => [k, fact.payload[k] == null ? "" : String(fact.payload[k])]));
+  });
   const coerced = useMemo<Record<string, unknown>>(() => {
+    if (objectType) return coerceByCatalog(objectType, draft);
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(draft)) {
       const orig = fact.payload[k];
@@ -258,8 +271,12 @@ function FactCard({
       else out[k] = v;
     }
     return out;
-  }, [draft, fact.payload]);
-  const dirty = JSON.stringify(coerced) !== JSON.stringify(fact.payload);
+  }, [draft, fact.payload, objectType]);
+  const dirty = objectType
+    ? sortedJson(coerced) !== sortedJson(fact.payload)
+    : JSON.stringify(coerced) !== JSON.stringify(fact.payload);
+  // promop needs these to commit; the extraction doesn't require them (alignment §3.3).
+  const missingForCommit = objectType?.commit_required.filter((k) => coerced[k] == null) ?? [];
   const sb = statusBadge(fact.status);
 
   const setField = (key: string, raw: string) => setDraft((d) => ({ ...d, [key]: raw }));
@@ -274,7 +291,9 @@ function FactCard({
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
-          <Badge variant="secondary">{fact.domain || fact.extractor_key}</Badge>
+          <Badge variant="secondary" title={fact.object_type || undefined}>
+            {objectType?.label ?? (fact.domain || fact.extractor_key)}
+          </Badge>
           <Badge variant={sb.variant} className={sb.className}>
             {fact.status}
           </Badge>
@@ -323,6 +342,11 @@ function FactCard({
             />
           </div>
         ))}
+        {missingForCommit.length > 0 && (
+          <p className="text-[11px] text-warning">
+            Needed to commit to promop: <span className="font-mono">{missingForCommit.join(", ")}</span>
+          </p>
+        )}
         {dirty && (
           <Button variant="outline" size="sm" className="mt-1 h-7" disabled={saving} onClick={() => onSave(coerced)}>
             Save changes
@@ -383,25 +407,23 @@ export function ReviewPanel({ docId }: { docId: number }) {
     }
   }, [job?.status, docId, qc]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The object catalog (#94): labels on fact cards, and the add-a-fact form's types + fields.
+  const catalog = useObjectTypes();
+  const byKey = useMemo(() => Object.fromEntries((catalog.data ?? []).map((o) => [o.key, o])), [catalog.data]);
+
   const [addOpen, setAddOpen] = useState(false);
   const [newSnippet, setNewSnippet] = useState("");
-  const [newDomain, setNewDomain] = useState("labs");
+  const [newType, setNewType] = useState("measurement");
   const [newFields, setNewFields] = useState<Record<string, string>>({});
+  const newObjectType = byKey[newType] as ObjectType | undefined;
 
-  // A representative existing fact of the chosen type (its fields become the form,
-  // and its value types drive number coercion on submit).
-  const sampleFor = (domain: string) =>
-    facts.data?.find((f) => (f.domain || f.extractor_key) === domain)?.payload;
-  const fieldsForDomain = (domain: string): string[] => {
-    const sample = sampleFor(domain);
-    if (sample && Object.keys(sample).length) return Object.keys(sample);
-    return FIELD_TEMPLATES[domain] ?? ["name", "value"];
-  };
-  // Reset the form fields to the type's template whenever the dialog opens or the
-  // type changes.
+  // Reset the form to the chosen object type's catalog fields whenever the dialog
+  // opens or the type changes.
   useEffect(() => {
-    if (addOpen) setNewFields(Object.fromEntries(fieldsForDomain(newDomain).map((k) => [k, ""])));
-  }, [addOpen, newDomain]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (addOpen && newObjectType) {
+      setNewFields(Object.fromEntries(Object.keys(newObjectType.source_schema.properties).map((k) => [k, ""])));
+    }
+  }, [addOpen, newObjectType]);
 
   const openAdd = () => {
     const sel = window.getSelection()?.toString().trim();
@@ -423,22 +445,21 @@ export function ReviewPanel({ docId }: { docId: number }) {
   };
 
   const addFact = () => {
-    const sample = sampleFor(newDomain);
-    const payload: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(newFields)) {
-      const numeric = sample && typeof sample[k] === "number";
-      if (v.trim() === "") payload[k] = numeric ? null : "";
-      else payload[k] = numeric && !Number.isNaN(Number(v)) ? Number(v) : v;
-    }
+    if (!newObjectType) return;
+    const payload = coerceByCatalog(newObjectType, newFields);
     actions.addFact.mutate(
-      { document: docId, domain: newDomain, snippet: newSnippet, payload },
+      { document: docId, object_type: newType, snippet: newSnippet, payload },
       {
         onSuccess: () => {
           setAddOpen(false);
           setNewSnippet("");
           toast.success("Fact added");
         },
-        onError: () => toast.error("Could not add fact (snippet must match the text)"),
+        onError: (err) =>
+          toast.error(
+            (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ??
+              "Could not add fact (snippet must match the text)",
+          ),
       },
     );
   };
@@ -488,8 +509,9 @@ export function ReviewPanel({ docId }: { docId: number }) {
             <ul className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
               {facts.data?.map((f) => (
                 <FactCard
-                  key={f.id}
+                  key={`${f.id}:${f.object_type && byKey[f.object_type] ? "typed" : "raw"}`}
                   fact={f}
+                  objectType={f.object_type ? byKey[f.object_type] : undefined}
                   active={active?.id === f.id}
                   saving={actions.editFact.isPending}
                   showNotLocated={docView === "image" && !f.provenance.bbox}
@@ -580,15 +602,15 @@ export function ReviewPanel({ docId }: { docId: number }) {
 
             <div className="space-y-3">
               <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
-                <Label>Type</Label>
-                <Select value={newDomain} onValueChange={(v) => setNewDomain(v ?? "labs")}>
+                <Label>Object type</Label>
+                <Select value={newType} onValueChange={(v) => setNewType(v ?? "measurement")}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{newObjectType?.label ?? newType}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
+                    {(catalog.data ?? []).map((o) => (
+                      <SelectItem key={o.key} value={o.key}>
+                        {o.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -612,8 +634,13 @@ export function ReviewPanel({ docId }: { docId: number }) {
               <div className="space-y-1.5 border-t pt-3">
                 {Object.entries(newFields).map(([key, value]) => (
                   <div key={key} className="grid grid-cols-[6rem_1fr] items-center gap-2">
-                    <Label htmlFor={`new-${key}`} className="truncate text-xs font-normal text-muted-foreground">
+                    <Label
+                      htmlFor={`new-${key}`}
+                      title={newObjectType?.field_guide[key]}
+                      className="truncate text-xs font-normal text-muted-foreground"
+                    >
                       {key}
+                      {newObjectType?.source_schema.required.includes(key) && " *"}
                     </Label>
                     <Input
                       id={`new-${key}`}

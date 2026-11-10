@@ -69,7 +69,7 @@ class ExtractionRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExtractionRecord
         fields = (
-            "id", "document", "extractor_key", "domain", "payload", "provenance",
+            "id", "document", "extractor_key", "object_type", "domain", "payload", "provenance",
             "extractor_version_id", "confidence", "status", "reviewed_at", "created_at",
         )
         read_only_fields = fields
