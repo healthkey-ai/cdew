@@ -14,6 +14,17 @@ import { ROLES, useCreateUser, useSetRoles, useUsers } from "./api";
 
 const EMPTY = { email: "", name: "", password: "", roles: [] as string[] };
 
+/** Where an account signs in: CDEW-local, an org's Firebase, or a promop/phr host. */
+function signInSource(issuer: string) {
+  if (issuer === "urn:local") return "CDEW account";
+  if (issuer.startsWith("https://securetoken.google.com/")) return "Firebase";
+  try {
+    return new URL(issuer).host;
+  } catch {
+    return issuer;
+  }
+}
+
 /** Admin-gated user provisioning (design §11) — the create-user / "signup"
  * surface. Create local accounts and edit their role grants. */
 export function UsersPage() {
@@ -53,7 +64,9 @@ export function UsersPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Users</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Provision internal CDM accounts and manage their roles. There is no public sign-up.
+          Provision internal CDM accounts and manage their roles. Staff who sign in with a promop,
+          phr or Firebase account appear here after their first sign-in, with no roles until you
+          grant one. There is no public sign-up.
         </p>
       </div>
 
@@ -130,6 +143,7 @@ export function UsersPage() {
               <TableRow>
                 <TableHead>Email</TableHead>
                 <TableHead>Name</TableHead>
+                <TableHead>Signs in via</TableHead>
                 <TableHead>Roles</TableHead>
               </TableRow>
             </TableHeader>
@@ -145,6 +159,14 @@ export function UsersPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">{u.name || "—"}</TableCell>
+                  <TableCell className="text-muted-foreground" title={u.issuer}>
+                    {signInSource(u.issuer)}
+                    {u.roles.length === 0 && (
+                      <Badge variant="outline" className="ml-2">
+                        no role
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-4">
                       {ROLES.map((role) => (
@@ -171,7 +193,7 @@ export function UsersPage() {
               ))}
               {users.data && users.data.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={3} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
                     No users yet.
                   </TableCell>
                 </TableRow>

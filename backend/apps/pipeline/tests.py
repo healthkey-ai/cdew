@@ -260,7 +260,10 @@ class ClassifyDocumentTests(TestCase):
 
 class JobApiTests(APITestCase):
     def setUp(self):
+        from apps.accounts.models import Role, RoleAssignment
+
         identity = Identity.objects.create(issuer="urn:local", sub="j1", email="j@x.org")
+        RoleAssignment.objects.create(identity=identity, role=Role.REVIEWER)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(identity).access_token}")
 
     def _upload(self, patient="PT"):
