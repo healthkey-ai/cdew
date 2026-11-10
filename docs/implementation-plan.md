@@ -459,8 +459,9 @@ concept ids.
 - **Idempotency** is per `(document, version)` for ad-hoc runs. A different pick adds facts beside
   earlier ones, a re-run replaces only its own, and routed extractors' facts are untouched. The
   document's status is left as it is.
-- **Unclassified documents.** This works on documents waiting in `needs_classification`. Staging
-  doesn't auto-classify (`PIPELINE_AUTO_CLASSIFY=False`), so it is a reviewer's way to get facts.
+- **Unclassified documents.** This works on documents waiting in `needs_classification`, ones the
+  classifier couldn't route. It is a reviewer's way to get facts from them. (Uploads run through to
+  review by default since 2026-11-10: `PIPELINE_AUTO_CLASSIFY=True`.)
 - **"Classify now"** is the routed counterpart.
   - Reviewers call `POST /api/v1/documents/{id}/classify/`; the inbox row and the review panel
     offer it as **Classify**.

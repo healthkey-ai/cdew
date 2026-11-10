@@ -139,10 +139,10 @@ goes queued → completed. `make prefect-concurrency` creates the `gemini` task 
 Zero-infra alternative: `PREFECT_DISPATCH=thread` runs the flow in a background thread via Prefect's
 ephemeral API (no server/UI). Tests always use `local`.
 
-**Server database.** The Prefect server defaults to SQLite (`~/.prefect`) — fine for the default
-parse-only pipeline. Once you enable `PIPELINE_AUTO_CLASSIFY` (the classify/extract **task fan-out**),
-the concurrent writes make SQLite lock (`database is locked`); use **Postgres** instead (`asyncpg` is
-already a dependency):
+**Server database.** The Prefect server defaults to SQLite (`~/.prefect`). That is fine for a
+parse-only pipeline (`PIPELINE_AUTO_CLASSIFY=False`). With auto-classify on, which is the default,
+the classify/extract **task fan-out**'s concurrent writes make SQLite lock (`database is locked`). Use
+**Postgres** instead (`asyncpg` is already a dependency):
 
 ```bash
 make prefect-db            # createdb prefect  (once)

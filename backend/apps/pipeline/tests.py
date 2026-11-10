@@ -133,8 +133,9 @@ class LlmTaskTests(TestCase):
 
 
 class PipelineServiceTests(TestCase):
-    def test_upload_stops_at_needs_classification_by_default(self):
-        # Default (PIPELINE_AUTO_CLASSIFY off): parse then wait in the human queue.
+    def test_upload_stops_at_needs_classification_when_auto_classify_is_off(self):
+        # PIPELINE_AUTO_CLASSIFY off (test settings; product default is on): parse,
+        # then wait in the human queue.
         job = ExtractionJob.objects.create(document=_doc())
         execute_pipeline(job.id)
         job.refresh_from_db()
@@ -158,6 +159,22 @@ class PipelineServiceTests(TestCase):
         stages = [h["stage"] for h in job.stage_history]
         assert stages == [Stage.PARSE, Stage.CLASSIFY, Stage.EXTRACT, Stage.DONE]
         assert all(h.get("at") for h in job.stage_history)
+
+    @override_settings(PIPELINE_AUTO_CLASSIFY=True)
+    def test_unroutable_upload_still_waits_for_a_human(self):
+        # Auto-classify never drops a document: nothing over threshold → the queue.
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from apps.documents.ingest import ingest_upload
+
+        doc, _ = ingest_upload(SimpleUploadedFile("n.txt", b"Patient called to reschedule.",
+                                                  content_type="text/plain"), "PQ")
+        job = ExtractionJob.objects.create(document=doc)
+        execute_pipeline(job.id)
+        job.refresh_from_db()
+        assert job.status == JobStatus.COMPLETED
+        assert job.document.status == DocumentStatus.NEEDS_CLASSIFICATION
+        assert job.document.extractions.count() == 0
 
     def test_stage_history_stops_at_failed_stage(self):
         # A parse failure leaves the timeline ending at the stage that stopped
@@ -311,7 +328,7 @@ class JobApiTests(APITestCase):
         assert body["status"] == JobStatus.COMPLETED
         assert body["stage"] == Stage.DONE
         assert body["progress"] == 1.0
-        # Default: upload does not auto-classify → waits in the human queue.
+        # Test settings pin auto-classify off → the upload waits in the human queue.
         assert SourceDocument.objects.get(id=r.json()["id"]).status == DocumentStatus.NEEDS_CLASSIFICATION
 
     def test_jobs_filter_by_document(self):
@@ -325,7 +342,7 @@ class JobApiTests(APITestCase):
         self.client.credentials()
         assert self.client.get("/api/v1/jobs/1/").status_code == 401
 
-    def test_upload_does_not_auto_extract_by_default(self):
+    def test_upload_does_not_auto_extract_when_auto_classify_is_off(self):
         f = SimpleUploadedFile("labs.txt", b"Hemoglobin 9.1 g/dL\nSodium 140 mmol/L", content_type="text/plain")
         r = self.client.post("/api/v1/documents/", {"file": f, "patient_ref": "PT-X"}, format="multipart")
         assert r.status_code == 201, r.content

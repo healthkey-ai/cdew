@@ -23,9 +23,10 @@ EXTRACT_FACTS_FN = "apps.prompts.testing.canned_facts"
 # Document AI double — no Doc AI calls in CI (design §9, #66).
 GEOMETRY_OCR_FN = "apps.documents.geometry.testing.fake_ocr"
 
-# Pin pipeline toggles regardless of a dev `.env` (which may flip these on for the
-# local engine) so tests are hermetic: dispatch inline, and don't auto-classify on
-# upload by default. Tests that need auto-classify use @override_settings.
+# Pin pipeline toggles regardless of a dev `.env` so tests are hermetic: dispatch
+# inline, and — unlike the product default — don't auto-classify on upload, so
+# tests that upload only to parse don't also classify and extract. Tests of the
+# full upload → review path use @override_settings(PIPELINE_AUTO_CLASSIFY=True).
 PREFECT_DISPATCH = "local"
 PIPELINE_AUTO_CLASSIFY = False
 

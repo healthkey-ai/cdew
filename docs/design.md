@@ -131,13 +131,18 @@ Each document flows top to bottom; stages run as Prefect tasks (§6).
 Design spine: one normalized document model regardless of source; classification gates extraction;
 every attribute is provenance-bearing; async, parallel, idempotent processing.
 
-> **As built:** uploads **do not auto-classify by default** (`settings.PIPELINE_AUTO_CLASSIFY`, off) —
-> a document is ingested and parsed, then waits in the human-classification queue (status
-> `needs_classification`) for a reviewer to classify; classify → extract (stages 3–5) then run on that
-> trigger. Set the flag on to auto-run classify → extract on upload. The trigger is **Classify** on the
-> inbox row or review panel (`POST /documents/{id}/classify/`, reviewer): it classifies the parsed text
-> (no re-parse) and runs the routed extractors. A reviewer can also extract chosen object types without
-> classifying (**Extract…**, ad-hoc, #114).
+> **As built:** an upload runs **automatically up to review**: ingest → parse → classify → route →
+> extract (`settings.PIPELINE_AUTO_CLASSIFY`, on by default).
+>
+> A document waits in the human-classification queue (`needs_classification`) only when:
+> - no type clears its threshold;
+> - it is a scan with no text; or
+> - the flag is switched off, which stops every upload after parsing.
+>
+> From the queue, a reviewer uses **Classify** on the inbox row or review panel
+> (`POST /documents/{id}/classify/`). It classifies the parsed text (no re-parse) and runs the routed
+> extractors. A reviewer can also extract chosen object types without classifying (**Extract…**,
+> ad-hoc, #114).
 
 ---
 
