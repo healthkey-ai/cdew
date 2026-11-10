@@ -80,10 +80,10 @@ def execute_pipeline(job_id: int, *, runner=None) -> ExtractionJob:
     if doc.status == DocumentStatus.NEEDS_CLASSIFICATION:
         return _finish(job, JobStatus.COMPLETED)
 
-    # Upload does NOT auto-classify by default (settings.PIPELINE_AUTO_CLASSIFY):
-    # a parsed document waits in the human-classification queue until a reviewer
-    # classifies it. Flip the setting on to auto-run classify → extract.
-    if not getattr(settings, "PIPELINE_AUTO_CLASSIFY", False):
+    # Upload runs on through classify → extract by default
+    # (settings.PIPELINE_AUTO_CLASSIFY). With it off, a parsed document waits in
+    # the human-classification queue until a reviewer clicks Classify.
+    if not getattr(settings, "PIPELINE_AUTO_CLASSIFY", True):
         doc.status = DocumentStatus.NEEDS_CLASSIFICATION
         doc.save(update_fields=["status", "updated_at"])
         return _finish(job, JobStatus.COMPLETED)

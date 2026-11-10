@@ -105,8 +105,8 @@ class AdHocExtractionTests(APITestCase):
         assert self.client.get(f"/api/v1/prompts/versions/{version_id}/").status_code == 404
 
     def test_works_on_a_document_waiting_for_classification(self):
-        # Staging doesn't auto-classify; ad-hoc is how a reviewer gets facts anyway.
-        self.doc.status = "needs_classification"  # where the pipeline leaves it without auto-classify
+        # A document the classifier couldn't route: ad-hoc is how a reviewer gets facts anyway.
+        self.doc.status = "needs_classification"
         self.doc.save(update_fields=["status"])
         assert self.run_ad_hoc("measurement").json()["status"] == "completed"
         self.doc.refresh_from_db()

@@ -47,8 +47,9 @@ class ExtractionJob(models.Model):
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
-    # "Classify now": a reviewer asked to classify (and extract) a parsed document,
-    # e.g. one waiting in needs_classification because auto-classify is off.
+    # "Classify now": a reviewer asked to classify (and extract) a parsed document
+    # waiting in needs_classification — one the classifier couldn't route, or any
+    # upload where auto-classify is switched off.
     classify_requested = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)

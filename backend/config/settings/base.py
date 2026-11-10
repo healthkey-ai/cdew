@@ -296,10 +296,11 @@ PREFECT_TASK_RETRIES = env.int("PREFECT_TASK_RETRIES", default=2)
 PREFECT_TASK_RETRY_DELAY_SECONDS = env.int("PREFECT_TASK_RETRY_DELAY_SECONDS", default=10)
 
 # ── Auto-classify on upload (design §3) ─────────────────────────────────────
-# Default OFF: an uploaded document is parsed and then waits in the
-# human-classification queue (status NEEDS_CLASSIFICATION); a reviewer triggers
-# classification/extraction. Set True to auto-run classify → extract on upload.
-PIPELINE_AUTO_CLASSIFY = env.bool("PIPELINE_AUTO_CLASSIFY", default=False)
+# Default ON: an uploaded document runs parse → classify → extract on its own and
+# stops at review. Only what the classifier can't route (no type over its
+# threshold) or a text-less scan waits in the human-classification queue. Set
+# False to stop every upload after parsing (reviewers then use Classify).
+PIPELINE_AUTO_CLASSIFY = env.bool("PIPELINE_AUTO_CLASSIFY", default=True)
 
 # ── Partner auth: staff sign-in via promop, phr or Firebase (design §11, #31) ──
 # PartnerAuthentication iterates these in order; the first provider that

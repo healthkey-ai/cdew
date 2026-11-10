@@ -64,7 +64,7 @@ services:
       - key: PREFECT_DISPATCH
         value: thread                # no Prefect server yet (design §6)
       - key: PIPELINE_AUTO_CLASSIFY
-        value: "False"
+        value: "True"                # upload runs through classify → extract to review
 
       # ── LLM: Claude via the Anthropic API (no GCP) ──────────────────────
       - key: LLM_PROVIDER

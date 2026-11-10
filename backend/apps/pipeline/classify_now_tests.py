@@ -1,5 +1,6 @@
-""""Classify now": a reviewer classifies a parsed document that auto-classify left
-waiting (PIPELINE_AUTO_CLASSIFY=False, as on staging and in test settings).
+""""Classify now": a reviewer classifies a parsed document waiting in the queue.
+Test settings keep PIPELINE_AUTO_CLASSIFY=False, so an upload stops after parsing —
+the same state as a document the classifier couldn't route.
 
 Offline: PREFECT_DISPATCH=local runs the job inline; classify/extract are doubles.
 """

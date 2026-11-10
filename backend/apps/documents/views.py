@@ -223,7 +223,8 @@ class DocumentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     def classify(self, request, pk=None):
         """"Classify now" (reviewer): classify this parsed document and run the
         extractors it routes to — for documents waiting in needs_classification
-        because auto-classify is off (PIPELINE_AUTO_CLASSIFY). Re-running replaces
+        (the classifier couldn't route them, a prompt changed since, or
+        PIPELINE_AUTO_CLASSIFY is off). Re-running replaces
         the routed extractors' facts, so a verified document is refused (unverify
         first). Returns the job (202) for polling."""
         from apps.pipeline.serializers import ExtractionJobSerializer

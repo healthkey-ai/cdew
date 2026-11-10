@@ -25,8 +25,8 @@ flowchart TD
     EMPTY{"near-empty text?<br/>scanned / image, no text layer"}
 
     AUTO{"PIPELINE_AUTO_CLASSIFY?"}
-    QUEUE["<b>Human classification queue</b><br/>doc.status=needs_classification<br/>job completes here by default"]
-    RECLS["Reviewer classifies →<br/>re-triggers classify → extract"]
+    QUEUE["<b>Human classification queue</b><br/>doc.status=needs_classification<br/>unroutable · text-less scan · auto-classify off"]
+    RECLS["Reviewer clicks Classify →<br/>classify → extract (or Extract… ad-hoc)"]
 
     CLS["<b>Classify</b> — LLM, multi-label<br/>active classifier PromptVersion<br/>each taxonomy type scored independently"]
     THRESH{"any type ≥ its threshold?"}
@@ -52,8 +52,8 @@ flowchart TD
     POK -- yes --> EMPTY
     EMPTY -- yes --> QUEUE
     EMPTY -- no --> AUTO
-    AUTO -- "off (default)" --> QUEUE
-    AUTO -- on --> CLS
+    AUTO -- off --> QUEUE
+    AUTO -- "on (default)" --> CLS
     QUEUE --> RECLS --> CLS
     CLS --> THRESH
     THRESH -- no --> UNCL --> QUEUE
